@@ -17,9 +17,6 @@
  * ```
  */
 
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-
 interface Env {
   SIRV_S3_KEY: string
   SIRV_S3_SECRET: string
@@ -54,6 +51,114 @@ const getCorsHeaders = (origin: string | null, allowedOrigins?: string): Headers
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
     'Access-Control-Max-Age': '86400',
   }
+}
+
+// AWS Signature V4 implementation for presigned URLs
+async function createPresignedUrl(
+  accessKey: string,
+  secretKey: string,
+  bucket: string,
+  key: string,
+  expiresIn: number = 300
+): Promise<string> {
+  const region = 'us-east-1'
+  const service = 's3'
+  const host = 's3.sirv.com'
+  const method = 'PUT'
+
+  const now = new Date()
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
+  const dateStamp = amzDate.slice(0, 8)
+
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+  const credential = `${accessKey}/${credentialScope}`
+
+  // Canonical request components
+  const canonicalUri = `/${bucket}/${key}`
+  const signedHeaders = 'host'
+
+  // Query parameters for presigned URL
+  const queryParams = new URLSearchParams({
+    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
+    'X-Amz-Credential': credential,
+    'X-Amz-Date': amzDate,
+    'X-Amz-Expires': expiresIn.toString(),
+    'X-Amz-SignedHeaders': signedHeaders,
+  })
+
+  // Sort query params
+  queryParams.sort()
+  const canonicalQueryString = queryParams.toString()
+
+  // Canonical headers
+  const canonicalHeaders = `host:${host}\n`
+
+  // Create canonical request
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQueryString,
+    canonicalHeaders,
+    signedHeaders,
+    'UNSIGNED-PAYLOAD',
+  ].join('\n')
+
+  // Create string to sign
+  const canonicalRequestHash = await sha256Hex(canonicalRequest)
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    canonicalRequestHash,
+  ].join('\n')
+
+  // Calculate signature
+  const signingKey = await getSignatureKey(secretKey, dateStamp, region, service)
+  const signature = await hmacHex(signingKey, stringToSign)
+
+  // Build final URL
+  queryParams.set('X-Amz-Signature', signature)
+  return `https://${host}${canonicalUri}?${queryParams.toString()}`
+}
+
+// HMAC-SHA256
+async function hmac(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw',
+    key,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  )
+  return crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(data))
+}
+
+async function hmacHex(key: ArrayBuffer, data: string): Promise<string> {
+  const sig = await hmac(key, data)
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+// SHA-256 hash
+async function sha256Hex(data: string): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data))
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+// Derive signing key
+async function getSignatureKey(
+  secretKey: string,
+  dateStamp: string,
+  region: string,
+  service: string
+): Promise<ArrayBuffer> {
+  const kDate = await hmac(new TextEncoder().encode('AWS4' + secretKey), dateStamp)
+  const kRegion = await hmac(kDate, region)
+  const kService = await hmac(kRegion, service)
+  return hmac(kService, 'aws4_request')
 }
 
 export default {
@@ -113,25 +218,15 @@ export default {
       const cleanFolder = folder.replace(/^\/+|\/+$/g, '')
       const key = cleanFolder ? `${cleanFolder}/${filename}` : filename
 
-      // Create S3 client for Sirv
-      const s3 = new S3Client({
-        endpoint: 'https://s3.sirv.com',
-        region: 'us-east-1', // Required by SDK but not used by Sirv
-        credentials: {
-          accessKeyId: env.SIRV_S3_KEY,
-          secretAccessKey: env.SIRV_S3_SECRET,
-        },
-        forcePathStyle: true, // Required for Sirv
-      })
+      // Generate presigned URL using our own implementation
+      const uploadUrl = await createPresignedUrl(
+        env.SIRV_S3_KEY,
+        env.SIRV_S3_SECRET,
+        env.SIRV_BUCKET,
+        key,
+        300 // 5 minutes
+      )
 
-      // Generate presigned URL
-      const command = new PutObjectCommand({
-        Bucket: env.SIRV_BUCKET,
-        Key: key,
-        ContentType: contentType,
-      })
-
-      const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 300 })
       const publicUrl = `https://${env.SIRV_BUCKET}.sirv.com/${key}`
 
       return Response.json(
@@ -160,12 +255,4 @@ export default {
  *   folder="/uploads"
  *   onUpload={(files) => console.log('Uploaded:', files)}
  * />
- *
- * Dependencies (package.json):
- * {
- *   "dependencies": {
- *     "@aws-sdk/client-s3": "^3.0.0",
- *     "@aws-sdk/s3-request-presigner": "^3.0.0"
- *   }
- * }
  */
