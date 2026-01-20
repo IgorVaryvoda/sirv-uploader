@@ -1,17 +1,16 @@
-# Sirv Upload Presign Worker
+# Sirv Upload Worker
 
-A Cloudflare Worker that generates presigned URLs for direct uploads to Sirv CDN.
+A Cloudflare Worker that proxies uploads to Sirv CDN using the REST API.
 
 ## Deploy
 
 [![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IgorVaryvoda/sirv-uploader/tree/main/examples/cloudflare-worker)
 
 During deployment, you'll be prompted for:
-- **SIRV_BUCKET** - Your Sirv account name (e.g., `mycompany`)
-- **SIRV_S3_KEY** - S3 Access Key
-- **SIRV_S3_SECRET** - S3 Secret Key
+- **SIRV_CLIENT_ID** - API Client ID
+- **SIRV_CLIENT_SECRET** - API Client Secret
 
-Get your S3 credentials from [Sirv Dashboard → Settings → S3 API](https://my.sirv.com/#/account/settings/api).
+Get your API credentials from [Sirv Dashboard → Settings → API](https://my.sirv.com/#/account/settings/api).
 
 ## Manual Setup
 
@@ -22,21 +21,13 @@ Get your S3 credentials from [Sirv Dashboard → Settings → S3 API](https://my
    npm install
    ```
 
-2. **Configure wrangler.toml:**
-   ```toml
-   [vars]
-   SIRV_BUCKET = "your-sirv-account"
-   ```
-
-3. **Set secrets:**
+2. **Set secrets:**
    ```bash
-   wrangler secret put SIRV_S3_KEY
-   wrangler secret put SIRV_S3_SECRET
+   wrangler secret put SIRV_CLIENT_ID
+   wrangler secret put SIRV_CLIENT_SECRET
    ```
 
-   Get your S3 credentials from [Sirv Dashboard → Settings → S3 API](https://my.sirv.com/#/account/settings/api)
-
-4. **Deploy:**
+3. **Deploy:**
    ```bash
    npm run deploy
    ```
@@ -47,24 +38,21 @@ Get your S3 credentials from [Sirv Dashboard → Settings → S3 API](https://my
 import { SirvUploader } from '@sirv/upload-widget'
 
 <SirvUploader
-  presignEndpoint="https://sirv-upload-presign.YOUR-SUBDOMAIN.workers.dev/presign"
+  proxyEndpoint="https://sirv-upload.YOUR-SUBDOMAIN.workers.dev"
   folder="/uploads"
 />
 ```
 
 ## Local Development
 
-```bash
-npm run dev
-```
-
-Then use `http://localhost:8787/presign` as your endpoint.
+1. Copy `.dev.vars.example` to `.dev.vars` and fill in your credentials
+2. Run `npm run dev`
+3. Use `http://localhost:8787` as your endpoint
 
 ## Environment Variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `SIRV_S3_KEY` | Yes | Sirv S3 Access Key (set as secret) |
-| `SIRV_S3_SECRET` | Yes | Sirv S3 Secret Key (set as secret) |
-| `SIRV_BUCKET` | Yes | Your Sirv account name |
+| `SIRV_CLIENT_ID` | Yes | Sirv API Client ID |
+| `SIRV_CLIENT_SECRET` | Yes | Sirv API Client Secret |
 | `ALLOWED_ORIGINS` | No | Comma-separated allowed origins for CORS |
