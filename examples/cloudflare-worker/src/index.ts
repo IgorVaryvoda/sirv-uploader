@@ -1,5 +1,5 @@
 /**
- * Cloudflare Worker Example - Presigned URL Endpoint
+ * Cloudflare Worker - Presigned URL Endpoint for Sirv
  *
  * Deploy with Wrangler:
  *   wrangler deploy
@@ -17,13 +17,13 @@
  * ```
  */
 
-import { AwsClient } from 'aws4fetch'
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 
 interface Env {
   SIRV_S3_KEY: string
   SIRV_S3_SECRET: string
   SIRV_BUCKET: string
-  // Optional: restrict to specific origins
   ALLOWED_ORIGINS?: string
 }
 
@@ -36,7 +36,6 @@ interface PresignRequest {
 
 // CORS headers helper
 const getCorsHeaders = (origin: string | null, allowedOrigins?: string): HeadersInit => {
-  // If no allowed origins specified, allow all
   if (!allowedOrigins) {
     return {
       'Access-Control-Allow-Origin': origin || '*',
@@ -46,8 +45,7 @@ const getCorsHeaders = (origin: string | null, allowedOrigins?: string): Headers
     }
   }
 
-  // Check if origin is in allowed list
-  const allowed = allowedOrigins.split(',').map(o => o.trim())
+  const allowed = allowedOrigins.split(',').map((o) => o.trim())
   const isAllowed = origin && allowed.includes(origin)
 
   return {
@@ -58,32 +56,20 @@ const getCorsHeaders = (origin: string | null, allowedOrigins?: string): Headers
   }
 }
 
-// Handle CORS preflight
-const handleOptions = (request: Request, env: Env): Response => {
-  const origin = request.headers.get('Origin')
-  return new Response(null, {
-    status: 204,
-    headers: getCorsHeaders(origin, env.ALLOWED_ORIGINS),
-  })
-}
-
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
     const origin = request.headers.get('Origin')
     const corsHeaders = getCorsHeaders(origin, env.ALLOWED_ORIGINS)
 
-    // Handle CORS preflight for any path
+    // Handle CORS preflight
     if (request.method === 'OPTIONS') {
-      return handleOptions(request, env)
+      return new Response(null, { status: 204, headers: corsHeaders })
     }
 
     // Only accept POST to /presign
     if (request.method !== 'POST' || !url.pathname.endsWith('/presign')) {
-      return new Response('Not Found', {
-        status: 404,
-        headers: corsHeaders,
-      })
+      return new Response('Not Found', { status: 404, headers: corsHeaders })
     }
 
     try {
@@ -109,8 +95,12 @@ export default {
 
       // Validate content type
       const allowedTypes = [
-        'image/jpeg', 'image/png', 'image/gif',
-        'image/webp', 'image/avif', 'image/heic'
+        'image/jpeg',
+        'image/png',
+        'image/gif',
+        'image/webp',
+        'image/avif',
+        'image/heic',
       ]
       if (!allowedTypes.includes(contentType)) {
         return Response.json(
@@ -123,31 +113,25 @@ export default {
       const cleanFolder = folder.replace(/^\/+|\/+$/g, '')
       const key = cleanFolder ? `${cleanFolder}/${filename}` : filename
 
-      // Create AWS client for Sirv's S3 endpoint
-      const aws = new AwsClient({
-        accessKeyId: env.SIRV_S3_KEY,
-        secretAccessKey: env.SIRV_S3_SECRET,
-        service: 's3',
-        region: 'us-east-1',
+      // Create S3 client for Sirv
+      const s3 = new S3Client({
+        endpoint: 'https://s3.sirv.com',
+        region: 'us-east-1', // Required by SDK but not used by Sirv
+        credentials: {
+          accessKeyId: env.SIRV_S3_KEY,
+          secretAccessKey: env.SIRV_S3_SECRET,
+        },
+        forcePathStyle: true, // Required for Sirv
       })
 
-      // Generate presigned URL (valid for 5 minutes)
-      const s3Url = new URL(`https://s3.sirv.com/${env.SIRV_BUCKET}/${key}`)
-      const expiresIn = 300
-
-      // Sign the request
-      const signedRequest = await aws.sign(s3Url.toString(), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': contentType,
-        },
-        aws: {
-          signQuery: true,
-          expiresIn,
-        },
+      // Generate presigned URL
+      const command = new PutObjectCommand({
+        Bucket: env.SIRV_BUCKET,
+        Key: key,
+        ContentType: contentType,
       })
 
-      const uploadUrl = signedRequest.url
+      const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 300 })
       const publicUrl = `https://${env.SIRV_BUCKET}.sirv.com/${key}`
 
       return Response.json(
@@ -180,7 +164,8 @@ export default {
  * Dependencies (package.json):
  * {
  *   "dependencies": {
- *     "aws4fetch": "^1.0.18"
+ *     "@aws-sdk/client-s3": "^3.0.0",
+ *     "@aws-sdk/s3-request-presigner": "^3.0.0"
  *   }
  * }
  */
