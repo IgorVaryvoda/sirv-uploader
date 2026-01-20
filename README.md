@@ -159,9 +159,9 @@ import type {
 
 ### Cloudflare Workers (One-Click Deploy)
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IgorVaryvoda/sirv-uploader/tree/main/examples/cloudflare-worker&secret[SIRV_S3_KEY]&secret[SIRV_S3_SECRET]&var[SIRV_BUCKET])
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IgorVaryvoda/sirv-uploader/tree/main/examples/cloudflare-worker)
 
-You'll be prompted for your Sirv S3 credentials during deployment. Get them from [Sirv Dashboard → Settings → S3 API](https://my.sirv.com/#/account/settings/api).
+You'll be prompted for your Sirv account name and S3 credentials during deployment.
 
 ### Other Examples
 

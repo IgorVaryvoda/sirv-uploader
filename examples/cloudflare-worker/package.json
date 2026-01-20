@@ -14,5 +14,18 @@
     "@cloudflare/workers-types": "^4.20241218.0",
     "typescript": "^5.0.0",
     "wrangler": "^3.99.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "SIRV_BUCKET": {
+        "description": "Your Sirv account name (e.g., `mycompany`). Find it in your [Sirv Dashboard](https://my.sirv.com/)."
+      },
+      "SIRV_S3_KEY": {
+        "description": "S3 Access Key from [Sirv Dashboard → Settings → S3 API](https://my.sirv.com/#/account/settings/api)."
+      },
+      "SIRV_S3_SECRET": {
+        "description": "S3 Secret Key from [Sirv Dashboard → Settings → S3 API](https://my.sirv.com/#/account/settings/api)."
+      }
+    }
   }
 }
