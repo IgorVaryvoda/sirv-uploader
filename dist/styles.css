@@ -1,0 +1,806 @@
+/**
+ * Sirv Upload Widget - Default Styles
+ *
+ * Customize using CSS variables:
+ *
+ * :root {
+ *   --sirv-primary: #0066cc;
+ *   --sirv-primary-hover: #0052a3;
+ *   --sirv-bg: #ffffff;
+ *   --sirv-text: #1a1a1a;
+ *   // ... etc
+ * }
+ */
+
+/* =============================================================================
+   CSS Variables (Theme)
+   ============================================================================= */
+
+.sirv-uploader {
+  /* Colors */
+  --sirv-primary: #0066cc;
+  --sirv-primary-hover: #0052a3;
+  --sirv-primary-light: #e6f0fa;
+  --sirv-success: #22c55e;
+  --sirv-success-light: #dcfce7;
+  --sirv-error: #ef4444;
+  --sirv-error-light: #fee2e2;
+  --sirv-warning: #f59e0b;
+
+  /* Neutrals */
+  --sirv-bg: #ffffff;
+  --sirv-bg-subtle: #f8fafc;
+  --sirv-bg-muted: #f1f5f9;
+  --sirv-border: #e2e8f0;
+  --sirv-border-strong: #cbd5e1;
+  --sirv-text: #1e293b;
+  --sirv-text-muted: #64748b;
+  --sirv-text-subtle: #94a3b8;
+
+  /* Sizing */
+  --sirv-radius: 8px;
+  --sirv-radius-sm: 4px;
+  --sirv-radius-lg: 12px;
+  --sirv-spacing: 16px;
+  --sirv-spacing-sm: 8px;
+  --sirv-spacing-xs: 4px;
+
+  /* Typography */
+  --sirv-font: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --sirv-font-size: 14px;
+  --sirv-font-size-sm: 12px;
+  --sirv-font-size-lg: 16px;
+
+  /* Transitions */
+  --sirv-transition: 150ms ease;
+
+  /* Shadows */
+  --sirv-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --sirv-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* =============================================================================
+   Base Container
+   ============================================================================= */
+
+.sirv-uploader {
+  font-family: var(--sirv-font);
+  font-size: var(--sirv-font-size);
+  color: var(--sirv-text);
+  background: var(--sirv-bg);
+  border-radius: var(--sirv-radius-lg);
+  border: 1px solid var(--sirv-border);
+  overflow: hidden;
+}
+
+/* =============================================================================
+   Tabs
+   ============================================================================= */
+
+.sirv-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--sirv-border);
+  background: var(--sirv-bg-subtle);
+}
+
+.sirv-tabs__tab {
+  flex: 1;
+  padding: var(--sirv-spacing-sm) var(--sirv-spacing);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--sirv-text-muted);
+  font-size: var(--sirv-font-size);
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--sirv-transition);
+}
+
+.sirv-tabs__tab:hover {
+  color: var(--sirv-text);
+  background: var(--sirv-bg-muted);
+}
+
+.sirv-tabs__tab--active {
+  color: var(--sirv-primary);
+  border-bottom-color: var(--sirv-primary);
+  background: var(--sirv-bg);
+}
+
+/* =============================================================================
+   DropZone
+   ============================================================================= */
+
+.sirv-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: var(--sirv-spacing) calc(var(--sirv-spacing) * 2);
+  border: 2px dashed var(--sirv-border-strong);
+  border-radius: var(--sirv-radius);
+  background: var(--sirv-bg-subtle);
+  cursor: pointer;
+  transition: all var(--sirv-transition);
+  margin: var(--sirv-spacing);
+}
+
+.sirv-dropzone:hover,
+.sirv-dropzone:focus-visible {
+  border-color: var(--sirv-primary);
+  background: var(--sirv-primary-light);
+}
+
+.sirv-dropzone--drag-over {
+  border-color: var(--sirv-primary);
+  background: var(--sirv-primary-light);
+  transform: scale(1.01);
+}
+
+.sirv-dropzone--disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sirv-dropzone--compact {
+  min-height: 120px;
+  padding: var(--sirv-spacing);
+}
+
+.sirv-dropzone__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.sirv-dropzone__content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sirv-spacing-sm);
+  text-align: center;
+}
+
+.sirv-dropzone__icon {
+  width: 48px;
+  height: 48px;
+  color: var(--sirv-text-muted);
+}
+
+.sirv-dropzone__text {
+  margin: 0;
+  font-size: var(--sirv-font-size-lg);
+  font-weight: 500;
+  color: var(--sirv-text);
+}
+
+.sirv-dropzone__hint {
+  margin: 0;
+  font-size: var(--sirv-font-size-sm);
+  color: var(--sirv-text-muted);
+}
+
+.sirv-dropzone__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--sirv-border);
+  border-top-color: var(--sirv-primary);
+  border-radius: 50%;
+  animation: sirv-spin 0.8s linear infinite;
+}
+
+@keyframes sirv-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* =============================================================================
+   FileList
+   ============================================================================= */
+
+.sirv-filelist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sirv-spacing-xs);
+  padding: 0 var(--sirv-spacing) var(--sirv-spacing);
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.sirv-filelist__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sirv-spacing-sm);
+  padding: var(--sirv-spacing-sm);
+  background: var(--sirv-bg-subtle);
+  border-radius: var(--sirv-radius-sm);
+  position: relative;
+}
+
+.sirv-filelist__item--success {
+  background: var(--sirv-success-light);
+}
+
+.sirv-filelist__item--error {
+  background: var(--sirv-error-light);
+}
+
+.sirv-filelist__thumbnail {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--sirv-radius-sm);
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--sirv-bg-muted);
+}
+
+.sirv-filelist__thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sirv-filelist__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.sirv-filelist__name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sirv-filelist__meta {
+  display: flex;
+  gap: var(--sirv-spacing-sm);
+  font-size: var(--sirv-font-size-sm);
+  color: var(--sirv-text-muted);
+}
+
+.sirv-filelist__error {
+  font-size: var(--sirv-font-size-sm);
+  color: var(--sirv-error);
+  margin-top: var(--sirv-spacing-xs);
+}
+
+.sirv-filelist__status--success {
+  color: var(--sirv-success);
+}
+
+.sirv-filelist__status--error {
+  color: var(--sirv-error);
+}
+
+.sirv-filelist__progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--sirv-border);
+  border-radius: 0 0 var(--sirv-radius-sm) var(--sirv-radius-sm);
+  overflow: hidden;
+}
+
+.sirv-filelist__progress-bar {
+  height: 100%;
+  background: var(--sirv-primary);
+  transition: width var(--sirv-transition);
+}
+
+.sirv-filelist__actions {
+  display: flex;
+  gap: var(--sirv-spacing-xs);
+  flex-shrink: 0;
+}
+
+.sirv-filelist__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--sirv-radius-sm);
+  color: var(--sirv-text-muted);
+  cursor: pointer;
+  transition: all var(--sirv-transition);
+}
+
+.sirv-filelist__action:hover {
+  background: var(--sirv-bg-muted);
+  color: var(--sirv-text);
+}
+
+.sirv-filelist__action svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sirv-filelist__action--remove:hover {
+  color: var(--sirv-error);
+}
+
+.sirv-filelist__check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--sirv-success);
+}
+
+.sirv-filelist__check svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Summary */
+.sirv-filelist-summary {
+  display: flex;
+  gap: var(--sirv-spacing);
+  padding: var(--sirv-spacing-sm) var(--sirv-spacing);
+  font-size: var(--sirv-font-size-sm);
+  color: var(--sirv-text-muted);
+  border-top: 1px solid var(--sirv-border);
+}
+
+.sirv-filelist-summary__success {
+  color: var(--sirv-success);
+}
+
+.sirv-filelist-summary__error {
+  color: var(--sirv-error);
+}
+
+/* =============================================================================
+   FilePicker Modal
+   ============================================================================= */
+
+.sirv-filepicker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  padding: var(--sirv-spacing);
+}
+
+.sirv-filepicker {
+  width: 100%;
+  max-width: 800px;
+  max-height: 90vh;
+  background: var(--sirv-bg);
+  border-radius: var(--sirv-radius-lg);
+  box-shadow: var(--sirv-shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sirv-filepicker__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sirv-spacing);
+  border-bottom: 1px solid var(--sirv-border);
+}
+
+.sirv-filepicker__title {
+  margin: 0;
+  font-size: var(--sirv-font-size-lg);
+  font-weight: 600;
+}
+
+.sirv-filepicker__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--sirv-radius-sm);
+  color: var(--sirv-text-muted);
+  cursor: pointer;
+  transition: all var(--sirv-transition);
+}
+
+.sirv-filepicker__close:hover {
+  background: var(--sirv-bg-muted);
+  color: var(--sirv-text);
+}
+
+.sirv-filepicker__close svg {
+  width: 20px;
+  height: 20px;
+}
+
+.sirv-filepicker__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sirv-spacing);
+  padding: var(--sirv-spacing-sm) var(--sirv-spacing);
+  background: var(--sirv-bg-subtle);
+  border-bottom: 1px solid var(--sirv-border);
+}
+
+.sirv-filepicker__breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--sirv-spacing-xs);
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.sirv-filepicker__breadcrumb {
+  display: flex;
+  align-items: center;
+  padding: var(--sirv-spacing-xs) var(--sirv-spacing-sm);
+  background: none;
+  border: none;
+  border-radius: var(--sirv-radius-sm);
+  color: var(--sirv-text-muted);
+  font-size: var(--sirv-font-size-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--sirv-transition);
+}
+
+.sirv-filepicker__breadcrumb:hover {
+  background: var(--sirv-bg-muted);
+  color: var(--sirv-text);
+}
+
+.sirv-filepicker__breadcrumb svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sirv-filepicker__breadcrumb-separator {
+  color: var(--sirv-text-subtle);
+}
+
+.sirv-filepicker__search-input {
+  width: 200px;
+  padding: var(--sirv-spacing-xs) var(--sirv-spacing-sm);
+  background: var(--sirv-bg);
+  border: 1px solid var(--sirv-border);
+  border-radius: var(--sirv-radius-sm);
+  font-size: var(--sirv-font-size-sm);
+  color: var(--sirv-text);
+}
+
+.sirv-filepicker__search-input:focus {
+  outline: none;
+  border-color: var(--sirv-primary);
+}
+
+.sirv-filepicker__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sirv-spacing);
+  min-height: 300px;
+}
+
+.sirv-filepicker__loading,
+.sirv-filepicker__empty,
+.sirv-filepicker__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--sirv-text-muted);
+  gap: var(--sirv-spacing-sm);
+}
+
+.sirv-filepicker__spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--sirv-border);
+  border-top-color: var(--sirv-primary);
+  border-radius: 50%;
+  animation: sirv-spin 0.8s linear infinite;
+}
+
+.sirv-filepicker__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--sirv-spacing-sm);
+}
+
+.sirv-filepicker__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sirv-spacing-xs);
+  padding: var(--sirv-spacing-sm);
+  background: var(--sirv-bg-subtle);
+  border: 2px solid transparent;
+  border-radius: var(--sirv-radius);
+  cursor: pointer;
+  transition: all var(--sirv-transition);
+  position: relative;
+}
+
+.sirv-filepicker__item:hover {
+  background: var(--sirv-bg-muted);
+}
+
+.sirv-filepicker__item--selected {
+  border-color: var(--sirv-primary);
+  background: var(--sirv-primary-light);
+}
+
+.sirv-filepicker__item-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sirv-text-muted);
+}
+
+.sirv-filepicker__item-icon svg {
+  width: 32px;
+  height: 32px;
+}
+
+.sirv-filepicker__item--folder .sirv-filepicker__item-icon {
+  color: var(--sirv-warning);
+}
+
+.sirv-filepicker__item-thumbnail {
+  width: 80px;
+  height: 60px;
+  border-radius: var(--sirv-radius-sm);
+  overflow: hidden;
+  background: var(--sirv-bg-muted);
+}
+
+.sirv-filepicker__item-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sirv-filepicker__item-name {
+  font-size: var(--sirv-font-size-sm);
+  text-align: center;
+  word-break: break-word;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.sirv-filepicker__item-size {
+  font-size: 10px;
+  color: var(--sirv-text-subtle);
+}
+
+.sirv-filepicker__item-check {
+  position: absolute;
+  top: var(--sirv-spacing-xs);
+  right: var(--sirv-spacing-xs);
+  width: 20px;
+  height: 20px;
+  background: var(--sirv-primary);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+
+.sirv-filepicker__item-check svg {
+  width: 12px;
+  height: 12px;
+}
+
+.sirv-filepicker__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sirv-spacing);
+  border-top: 1px solid var(--sirv-border);
+  background: var(--sirv-bg-subtle);
+}
+
+.sirv-filepicker__selection-count {
+  font-size: var(--sirv-font-size-sm);
+  color: var(--sirv-text-muted);
+}
+
+.sirv-filepicker__actions {
+  display: flex;
+  gap: var(--sirv-spacing-sm);
+}
+
+.sirv-filepicker__btn {
+  padding: var(--sirv-spacing-sm) var(--sirv-spacing);
+  background: var(--sirv-bg);
+  border: 1px solid var(--sirv-border);
+  border-radius: var(--sirv-radius-sm);
+  font-size: var(--sirv-font-size);
+  font-weight: 500;
+  color: var(--sirv-text);
+  cursor: pointer;
+  transition: all var(--sirv-transition);
+}
+
+.sirv-filepicker__btn:hover {
+  background: var(--sirv-bg-muted);
+}
+
+.sirv-filepicker__btn--primary {
+  background: var(--sirv-primary);
+  border-color: var(--sirv-primary);
+  color: white;
+}
+
+.sirv-filepicker__btn--primary:hover {
+  background: var(--sirv-primary-hover);
+}
+
+.sirv-filepicker__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* =============================================================================
+   Toolbar / Actions
+   ============================================================================= */
+
+.sirv-uploader__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sirv-spacing-sm) var(--sirv-spacing);
+  border-top: 1px solid var(--sirv-border);
+  background: var(--sirv-bg-subtle);
+}
+
+.sirv-uploader__toolbar-left,
+.sirv-uploader__toolbar-right {
+  display: flex;
+  gap: var(--sirv-spacing-sm);
+}
+
+.sirv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sirv-spacing-xs);
+  padding: var(--sirv-spacing-sm) var(--sirv-spacing);
+  background: var(--sirv-bg);
+  border: 1px solid var(--sirv-border);
+  border-radius: var(--sirv-radius-sm);
+  font-size: var(--sirv-font-size);
+  font-weight: 500;
+  color: var(--sirv-text);
+  cursor: pointer;
+  transition: all var(--sirv-transition);
+}
+
+.sirv-btn:hover {
+  background: var(--sirv-bg-muted);
+}
+
+.sirv-btn--primary {
+  background: var(--sirv-primary);
+  border-color: var(--sirv-primary);
+  color: white;
+}
+
+.sirv-btn--primary:hover {
+  background: var(--sirv-primary-hover);
+}
+
+.sirv-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sirv-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* =============================================================================
+   Spreadsheet Import
+   ============================================================================= */
+
+.sirv-spreadsheet {
+  padding: var(--sirv-spacing);
+}
+
+.sirv-spreadsheet__drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 150px;
+  padding: var(--sirv-spacing);
+  border: 2px dashed var(--sirv-border-strong);
+  border-radius: var(--sirv-radius);
+  background: var(--sirv-bg-subtle);
+  cursor: pointer;
+  transition: all var(--sirv-transition);
+}
+
+.sirv-spreadsheet__drop:hover {
+  border-color: var(--sirv-primary);
+  background: var(--sirv-primary-light);
+}
+
+.sirv-spreadsheet__icon {
+  width: 40px;
+  height: 40px;
+  color: var(--sirv-text-muted);
+  margin-bottom: var(--sirv-spacing-sm);
+}
+
+.sirv-spreadsheet__text {
+  font-size: var(--sirv-font-size);
+  color: var(--sirv-text);
+  margin: 0;
+}
+
+.sirv-spreadsheet__hint {
+  font-size: var(--sirv-font-size-sm);
+  color: var(--sirv-text-muted);
+  margin: var(--sirv-spacing-xs) 0 0;
+}
+
+.sirv-spreadsheet__preview {
+  margin-top: var(--sirv-spacing);
+}
+
+.sirv-spreadsheet__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--sirv-font-size-sm);
+}
+
+.sirv-spreadsheet__table th,
+.sirv-spreadsheet__table td {
+  padding: var(--sirv-spacing-xs) var(--sirv-spacing-sm);
+  border: 1px solid var(--sirv-border);
+  text-align: left;
+}
+
+.sirv-spreadsheet__table th {
+  background: var(--sirv-bg-subtle);
+  font-weight: 600;
+}
+
+.sirv-spreadsheet__stats {
+  display: flex;
+  gap: var(--sirv-spacing);
+  margin-top: var(--sirv-spacing);
+  font-size: var(--sirv-font-size-sm);
+}
+
+.sirv-spreadsheet__stat--valid {
+  color: var(--sirv-success);
+}
+
+.sirv-spreadsheet__stat--invalid {
+  color: var(--sirv-error);
+}
