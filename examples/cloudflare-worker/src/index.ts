@@ -1,35 +1,44 @@
 /**
- * Cloudflare Worker - Presigned URL Endpoint for Sirv
+ * Cloudflare Worker - Sirv Upload Proxy using REST API
+ *
+ * Uses Sirv's REST API instead of S3 for simpler, more reliable uploads.
  *
  * Deploy with Wrangler:
  *   wrangler deploy
  *
  * wrangler.toml:
  * ```toml
- * name = "sirv-presign"
+ * name = "sirv-upload"
  * main = "src/index.ts"
  * compatibility_date = "2024-01-01"
  *
- * [vars]
- * SIRV_BUCKET = "your-account"
- *
- * # Set secrets with: wrangler secret put SIRV_S3_KEY
+ * # Set secrets with:
+ * # wrangler secret put SIRV_CLIENT_ID
+ * # wrangler secret put SIRV_CLIENT_SECRET
  * ```
+ *
+ * Get your API credentials from: https://my.sirv.com/#/account/settings/api
  */
 
 interface Env {
-  SIRV_S3_KEY: string
-  SIRV_S3_SECRET: string
-  SIRV_BUCKET: string
+  SIRV_CLIENT_ID: string
+  SIRV_CLIENT_SECRET: string
   ALLOWED_ORIGINS?: string
 }
 
-interface PresignRequest {
+interface UploadRequest {
   filename: string
-  contentType: string
   folder?: string
-  size?: number
 }
+
+interface TokenResponse {
+  token: string
+  expiresIn: number
+  scope: string[]
+}
+
+// Token cache
+let cachedToken: { token: string; expiresAt: number } | null = null
 
 // CORS headers helper
 const getCorsHeaders = (origin: string | null, allowedOrigins?: string): HeadersInit => {
@@ -53,112 +62,57 @@ const getCorsHeaders = (origin: string | null, allowedOrigins?: string): Headers
   }
 }
 
-// AWS Signature V4 implementation for presigned URLs
-async function createPresignedUrl(
-  accessKey: string,
-  secretKey: string,
-  bucket: string,
-  key: string,
-  expiresIn: number = 300
-): Promise<string> {
-  const region = 'us-east-1'
-  const service = 's3'
-  const host = 's3.sirv.com'
-  const method = 'PUT'
+// Get Sirv API token
+async function getToken(clientId: string, clientSecret: string): Promise<string> {
+  // Check cache
+  if (cachedToken && Date.now() < cachedToken.expiresAt) {
+    return cachedToken.token
+  }
 
-  const now = new Date()
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
-  const dateStamp = amzDate.slice(0, 8)
-
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
-  const credential = `${accessKey}/${credentialScope}`
-
-  // Canonical request components
-  const canonicalUri = `/${bucket}/${key}`
-  const signedHeaders = 'host'
-
-  // Query parameters for presigned URL
-  const queryParams = new URLSearchParams({
-    'X-Amz-Algorithm': 'AWS4-HMAC-SHA256',
-    'X-Amz-Credential': credential,
-    'X-Amz-Date': amzDate,
-    'X-Amz-Expires': expiresIn.toString(),
-    'X-Amz-SignedHeaders': signedHeaders,
+  const response = await fetch('https://api.sirv.com/v2/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      clientId,
+      clientSecret,
+    }),
   })
 
-  // Sort query params
-  queryParams.sort()
-  const canonicalQueryString = queryParams.toString()
+  if (!response.ok) {
+    throw new Error(`Failed to get token: ${response.status}`)
+  }
 
-  // Canonical headers
-  const canonicalHeaders = `host:${host}\n`
+  const data: TokenResponse = await response.json()
 
-  // Create canonical request
-  const canonicalRequest = [
-    method,
-    canonicalUri,
-    canonicalQueryString,
-    canonicalHeaders,
-    signedHeaders,
-    'UNSIGNED-PAYLOAD',
-  ].join('\n')
+  // Cache token (expire 5 min early to be safe)
+  cachedToken = {
+    token: data.token,
+    expiresAt: Date.now() + (data.expiresIn - 300) * 1000,
+  }
 
-  // Create string to sign
-  const canonicalRequestHash = await sha256Hex(canonicalRequest)
-  const stringToSign = [
-    'AWS4-HMAC-SHA256',
-    amzDate,
-    credentialScope,
-    canonicalRequestHash,
-  ].join('\n')
-
-  // Calculate signature
-  const signingKey = await getSignatureKey(secretKey, dateStamp, region, service)
-  const signature = await hmacHex(signingKey, stringToSign)
-
-  // Build final URL
-  queryParams.set('X-Amz-Signature', signature)
-  return `https://${host}${canonicalUri}?${queryParams.toString()}`
+  return data.token
 }
 
-// HMAC-SHA256
-async function hmac(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    key,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  )
-  return crypto.subtle.sign('HMAC', cryptoKey, new TextEncoder().encode(data))
-}
+// Upload file to Sirv
+async function uploadToSirv(
+  token: string,
+  path: string,
+  file: ArrayBuffer,
+  contentType: string
+): Promise<void> {
+  const response = await fetch(`https://api.sirv.com/v2/files/upload?filename=${encodeURIComponent(path)}`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': contentType,
+    },
+    body: file,
+  })
 
-async function hmacHex(key: ArrayBuffer, data: string): Promise<string> {
-  const sig = await hmac(key, data)
-  return Array.from(new Uint8Array(sig))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-// SHA-256 hash
-async function sha256Hex(data: string): Promise<string> {
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(data))
-  return Array.from(new Uint8Array(hash))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-// Derive signing key
-async function getSignatureKey(
-  secretKey: string,
-  dateStamp: string,
-  region: string,
-  service: string
-): Promise<ArrayBuffer> {
-  const kDate = await hmac(new TextEncoder().encode('AWS4' + secretKey), dateStamp)
-  const kRegion = await hmac(kDate, region)
-  const kService = await hmac(kRegion, service)
-  return hmac(kService, 'aws4_request')
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`Upload failed: ${response.status} - ${error}`)
+  }
 }
 
 export default {
@@ -172,87 +126,88 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders })
     }
 
-    // Only accept POST to /presign
-    if (request.method !== 'POST' || !url.pathname.endsWith('/presign')) {
-      return new Response('Not Found', { status: 404, headers: corsHeaders })
+    // POST /upload - Upload a file
+    if (request.method === 'POST' && url.pathname.endsWith('/upload')) {
+      try {
+        // Get filename and folder from query params
+        const filename = url.searchParams.get('filename')
+        const folder = url.searchParams.get('folder') || '/'
+
+        if (!filename) {
+          return Response.json(
+            { error: 'Missing filename query parameter' },
+            { status: 400, headers: corsHeaders }
+          )
+        }
+
+        const contentType = request.headers.get('Content-Type') || 'application/octet-stream'
+
+        // Validate content type
+        const allowedTypes = [
+          'image/jpeg',
+          'image/png',
+          'image/gif',
+          'image/webp',
+          'image/avif',
+          'image/heic',
+          'image/svg+xml',
+        ]
+        if (!allowedTypes.some(t => contentType.startsWith(t))) {
+          return Response.json(
+            { error: `Invalid content type. Allowed: ${allowedTypes.join(', ')}` },
+            { status: 400, headers: corsHeaders }
+          )
+        }
+
+        // Build path
+        const cleanFolder = folder.replace(/^\/+|\/+$/g, '')
+        const path = cleanFolder ? `/${cleanFolder}/${filename}` : `/${filename}`
+
+        // Get token and upload
+        const token = await getToken(env.SIRV_CLIENT_ID, env.SIRV_CLIENT_SECRET)
+        const fileData = await request.arrayBuffer()
+
+        await uploadToSirv(token, path, fileData, contentType)
+
+        // Get account name from token info for public URL
+        const tokenInfo = await fetch('https://api.sirv.com/v2/account', {
+          headers: { 'Authorization': `Bearer ${token}` },
+        })
+        const account = await tokenInfo.json() as { alias: string }
+
+        return Response.json(
+          {
+            success: true,
+            path,
+            url: `https://${account.alias}.sirv.com${path}`,
+          },
+          { headers: corsHeaders }
+        )
+      } catch (error) {
+        console.error('Upload error:', error)
+        return Response.json(
+          { error: error instanceof Error ? error.message : 'Upload failed' },
+          { status: 500, headers: corsHeaders }
+        )
+      }
     }
 
-    try {
-      const body: PresignRequest = await request.json()
-      const { filename, contentType, folder = '/', size } = body
-
-      // Validate required fields
-      if (!filename || !contentType) {
-        return Response.json(
-          { error: 'Missing required fields: filename, contentType' },
-          { status: 400, headers: corsHeaders }
-        )
-      }
-
-      // Validate file size (10MB)
-      const maxSize = 10 * 1024 * 1024
-      if (size && size > maxSize) {
-        return Response.json(
-          { error: `File too large. Maximum size is ${maxSize / 1024 / 1024}MB` },
-          { status: 400, headers: corsHeaders }
-        )
-      }
-
-      // Validate content type
-      const allowedTypes = [
-        'image/jpeg',
-        'image/png',
-        'image/gif',
-        'image/webp',
-        'image/avif',
-        'image/heic',
-      ]
-      if (!allowedTypes.includes(contentType)) {
-        return Response.json(
-          { error: `Invalid content type. Allowed: ${allowedTypes.join(', ')}` },
-          { status: 400, headers: corsHeaders }
-        )
-      }
-
-      // Build the key (path) for the file
-      const cleanFolder = folder.replace(/^\/+|\/+$/g, '')
-      const key = cleanFolder ? `${cleanFolder}/${filename}` : filename
-
-      // Generate presigned URL using our own implementation
-      const uploadUrl = await createPresignedUrl(
-        env.SIRV_S3_KEY,
-        env.SIRV_S3_SECRET,
-        env.SIRV_BUCKET,
-        key,
-        300 // 5 minutes
-      )
-
-      const publicUrl = `https://${env.SIRV_BUCKET}.sirv.com/${key}`
-
-      return Response.json(
-        {
-          uploadUrl,
-          publicUrl,
-          path: '/' + key,
-        },
-        { headers: corsHeaders }
-      )
-    } catch (error) {
-      console.error('Presign error:', error)
-      return Response.json(
-        { error: 'Failed to generate upload URL' },
-        { status: 500, headers: corsHeaders }
-      )
-    }
+    return new Response('Not Found', { status: 404, headers: corsHeaders })
   },
 }
 
 /**
  * Usage with the widget:
  *
- * <SirvUploader
- *   presignEndpoint="https://sirv-presign.your-account.workers.dev/presign"
- *   folder="/uploads"
- *   onUpload={(files) => console.log('Uploaded:', files)}
- * />
+ * The widget needs to be updated to use this proxy endpoint instead of presigned URLs.
+ * For now, you can use it directly:
+ *
+ * const formData = new FormData()
+ * formData.append('file', file)
+ *
+ * fetch('https://your-worker.workers.dev/upload?filename=test.jpg&folder=/uploads', {
+ *   method: 'POST',
+ *   body: file, // Raw file, not FormData
+ *   headers: { 'Content-Type': file.type }
+ * })
  */

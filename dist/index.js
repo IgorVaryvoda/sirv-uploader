@@ -1374,21 +1374,14 @@ function useSirvUpload(options) {
       if (!proxyEndpoint) throw new Error("No proxy endpoint configured");
       if (!file.file) throw new Error("No file data");
       updateFile(file.id, { status: "uploading", progress: 10 });
-      const arrayBuffer = await file.file.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), "")
-      );
+      const uploadUrl = new URL(`${proxyEndpoint}/upload`);
+      uploadUrl.searchParams.set("filename", file.filename);
+      uploadUrl.searchParams.set("folder", folder);
       updateFile(file.id, { progress: 30 });
-      const res = await fetch(`${proxyEndpoint}/upload`, {
+      const res = await fetch(uploadUrl.toString(), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          data: base64,
-          filename: file.filename,
-          folder,
-          contentType: getMimeType(file.file),
-          onConflict: onConflict === "ask" ? "rename" : onConflict
-        }),
+        headers: { "Content-Type": getMimeType(file.file) },
+        body: file.file,
         signal
       });
       updateFile(file.id, { progress: 80 });
@@ -1407,7 +1400,7 @@ function useSirvUpload(options) {
         sirvPath: result.path
       });
     },
-    [proxyEndpoint, folder, onConflict, updateFile]
+    [proxyEndpoint, folder, updateFile]
   );
   const uploadFile = react.useCallback(
     async (id) => {

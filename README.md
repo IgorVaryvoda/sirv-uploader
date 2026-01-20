@@ -9,7 +9,6 @@ A React file upload widget for [Sirv CDN](https://sirv.com) with batch uploads, 
 - **CSV/Excel import** for bulk URL imports
 - **Sirv file picker** to browse existing files
 - **HEIC/HEIF conversion** for iPhone photos
-- **Presigned URL support** for secure direct uploads
 - **Dark mode** with automatic system preference detection
 - **Customizable styling** via CSS variables
 - **TypeScript** support with full type definitions
@@ -18,52 +17,19 @@ A React file upload widget for [Sirv CDN](https://sirv.com) with batch uploads, 
 
 ```bash
 npm install @sirv/upload-widget
-# or
-yarn add @sirv/upload-widget
-# or
-pnpm add @sirv/upload-widget
 ```
 
 ## Quick Start
 
-### 1. Create a presign endpoint on your backend
+### 1. Deploy the upload proxy
 
-The widget uploads directly to Sirv using presigned URLs. Your backend just needs one endpoint:
+The widget uploads through a proxy that handles Sirv authentication. Deploy to Cloudflare Workers:
 
-```typescript
-// app/api/sirv/presign/route.ts (Next.js)
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IgorVaryvoda/sirv-uploader/tree/main/examples/cloudflare-worker)
 
-const s3 = new S3Client({
-  endpoint: 'https://s3.sirv.com',
-  region: 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.SIRV_S3_KEY!,
-    secretAccessKey: process.env.SIRV_S3_SECRET!,
-  },
-  forcePathStyle: true,
-})
+You'll need your Sirv API credentials from [Sirv Dashboard → Settings → API](https://my.sirv.com/#/account/settings/api).
 
-export async function POST(req: Request) {
-  const { filename, contentType, folder } = await req.json()
-  const key = `${folder}/${filename}`.replace(/^\/+/, '')
-
-  const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
-    Bucket: process.env.SIRV_BUCKET!,
-    Key: key,
-    ContentType: contentType,
-  }), { expiresIn: 300 })
-
-  return Response.json({
-    uploadUrl,
-    publicUrl: `https://${process.env.SIRV_BUCKET}.sirv.com/${key}`,
-    path: '/' + key,
-  })
-}
-```
-
-### 2. Use the widget in your React app
+### 2. Use the widget
 
 ```tsx
 import { SirvUploader } from '@sirv/upload-widget'
@@ -72,7 +38,7 @@ import '@sirv/upload-widget/styles.css'
 export default function UploadPage() {
   return (
     <SirvUploader
-      presignEndpoint="/api/sirv/presign"
+      proxyEndpoint="https://your-worker.workers.dev"
       folder="/uploads"
       onUpload={(files) => {
         console.log('Uploaded files:', files)
@@ -86,8 +52,7 @@ export default function UploadPage() {
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `presignEndpoint` | `string` | - | **Recommended.** URL to get presigned upload URLs |
-| `proxyEndpoint` | `string` | - | Alternative: URL for full proxy mode |
+| `proxyEndpoint` | `string` | - | URL of your upload proxy (Cloudflare Worker) |
 | `folder` | `string` | `"/"` | Default upload folder |
 | `onUpload` | `(files: SirvFile[]) => void` | - | Callback when files are uploaded |
 | `onError` | `(error: string, file?: SirvFile) => void` | - | Callback on upload errors |
@@ -96,7 +61,6 @@ export default function UploadPage() {
 | `maxFileSize` | `number` | `10485760` | Maximum file size in bytes |
 | `autoUpload` | `boolean` | `true` | Start upload immediately on file selection |
 | `concurrency` | `number` | `3` | Number of concurrent uploads |
-| `onConflict` | `'overwrite' \| 'rename' \| 'skip' \| 'ask'` | `'rename'` | Filename conflict handling |
 | `disabled` | `boolean` | `false` | Disable the widget |
 | `compact` | `boolean` | `false` | Compact mode for smaller spaces |
 | `theme` | `'auto' \| 'light' \| 'dark'` | `'auto'` | Color theme (auto follows system preference) |
@@ -116,7 +80,7 @@ features?: {
 
 ## Dark Mode
 
-The widget supports dark mode out of the box with three options:
+The widget supports dark mode out of the box:
 
 ```tsx
 // Auto (default) - follows system preference
@@ -129,13 +93,9 @@ The widget supports dark mode out of the box with three options:
 <SirvUploader theme="dark" ... />
 ```
 
-Dark mode automatically activates when:
-- `theme="auto"` (default) and the user's system prefers dark mode
-- `theme="dark"` is explicitly set
-
 ## Styling
 
-Customize the widget using CSS variables:
+Customize using CSS variables:
 
 ```css
 .sirv-uploader {
@@ -145,74 +105,28 @@ Customize the widget using CSS variables:
   --sirv-text: #1e293b;
   --sirv-border: #e2e8f0;
   --sirv-radius: 8px;
-  /* ... see styles.css for all variables */
 }
 ```
 
-For dark mode customization, override the dark theme variables:
+## Self-hosting the Proxy
 
-```css
-@media (prefers-color-scheme: dark) {
-  .sirv-uploader {
-    --sirv-primary: #3b82f6;
-    --sirv-bg: #1e1e1e;
-    --sirv-text: #e5e5e5;
-    /* ... */
-  }
-}
+If you prefer to self-host, the proxy is a simple Cloudflare Worker:
+
+```typescript
+// See examples/cloudflare-worker/src/index.ts
 ```
 
-## Individual Components
-
-For custom layouts, you can use the components individually:
-
-```tsx
-import {
-  DropZone,
-  FileList,
-  FilePicker,
-  SpreadsheetImport,
-  useSirvUpload,
-} from '@sirv/upload-widget'
-```
+Required environment variables:
+- `SIRV_CLIENT_ID` - API Client ID from Sirv
+- `SIRV_CLIENT_SECRET` - API Client Secret from Sirv
 
 ## TypeScript
 
-Full TypeScript support with exported types:
+Full TypeScript support:
 
 ```typescript
-import type {
-  SirvFile,
-  SirvUploaderProps,
-  PresignRequest,
-  PresignResponse,
-} from '@sirv/upload-widget'
+import type { SirvFile, SirvUploaderProps } from '@sirv/upload-widget'
 ```
-
-## Backend Examples
-
-### Cloudflare Workers (One-Click Deploy)
-
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IgorVaryvoda/sirv-uploader/tree/main/examples/cloudflare-worker)
-
-You'll be prompted for your Sirv account name and S3 credentials during deployment.
-
-### Other Examples
-
-See the `/examples` folder for:
-- `cloudflare-worker/` - Cloudflare Workers (with deploy button)
-- `nextjs-presign.ts` - Next.js API route
-- `express-presign.ts` - Express.js server
-
-## How It Works
-
-1. User selects files in the widget
-2. Widget requests a presigned URL from your backend
-3. Your backend generates the URL using AWS SDK with Sirv's S3 endpoint
-4. Widget uploads directly to Sirv using the presigned URL
-5. File is available at `https://youraccount.sirv.com/path/to/file.jpg`
-
-This approach keeps your Sirv credentials secure on the server while allowing fast, direct uploads from the browser.
 
 ## License
 

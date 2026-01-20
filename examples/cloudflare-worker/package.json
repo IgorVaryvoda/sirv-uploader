@@ -15,14 +15,11 @@
   },
   "cloudflare": {
     "bindings": {
-      "SIRV_BUCKET": {
-        "description": "Your Sirv account name (e.g., `mycompany`). Find it in your [Sirv Dashboard](https://my.sirv.com/)."
+      "SIRV_CLIENT_ID": {
+        "description": "API Client ID from [Sirv Dashboard → Settings → API](https://my.sirv.com/#/account/settings/api)."
       },
-      "SIRV_S3_KEY": {
-        "description": "S3 Access Key from [Sirv Dashboard → Settings → S3 API](https://my.sirv.com/#/account/settings/api)."
-      },
-      "SIRV_S3_SECRET": {
-        "description": "S3 Secret Key from [Sirv Dashboard → Settings → S3 API](https://my.sirv.com/#/account/settings/api)."
+      "SIRV_CLIENT_SECRET": {
+        "description": "API Client Secret from [Sirv Dashboard → Settings → API](https://my.sirv.com/#/account/settings/api)."
       }
     }
   }
