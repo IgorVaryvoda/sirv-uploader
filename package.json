@@ -1,5 +1,5 @@
 {
-  "name": "@sirv/upload-widget",
+  "name": "@igorvaryvoda/sirv-upload-widget",
   "version": "0.1.0",
   "description": "A React file upload widget for Sirv CDN with batch uploads, CSV/Excel import, and file browser",
   "main": "./dist/index.js",
@@ -66,6 +66,9 @@
   ],
   "author": "Sirv",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/sirv/upload-widget"
