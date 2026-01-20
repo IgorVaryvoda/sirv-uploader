@@ -50,6 +50,7 @@ export function SirvUploader({
   className,
   disabled = false,
   compact = false,
+  theme = 'auto',
   labels: customLabels = {},
   children,
 }: SirvUploaderProps) {
@@ -150,8 +151,10 @@ export function SirvUploader({
   // Determine browse endpoint
   const browseEndpoint = proxyEndpoint || (presignEndpoint ? presignEndpoint.replace(/\/presign$/, '') : '')
 
+  const themeClass = theme === 'dark' ? 'sirv-uploader--dark' : theme === 'light' ? 'sirv-uploader--light' : undefined
+
   return (
-    <div className={clsx('sirv-uploader', className)}>
+    <div className={clsx('sirv-uploader', themeClass, className)}>
       {/* Tabs */}
       {showTabs && (
         <div className="sirv-tabs">

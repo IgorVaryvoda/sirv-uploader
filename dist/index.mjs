@@ -1564,6 +1564,7 @@ function SirvUploader({
   className,
   disabled = false,
   compact = false,
+  theme = "auto",
   labels: customLabels = {},
   children
 }) {
@@ -1640,7 +1641,8 @@ function SirvUploader({
   const hasPendingFiles = upload.files.some((f) => f.status === "pending" || f.status === "error");
   const showTabs = csvImport && batch;
   const browseEndpoint = proxyEndpoint || (presignEndpoint ? presignEndpoint.replace(/\/presign$/, "") : "");
-  return /* @__PURE__ */ jsxs("div", { className: clsx2("sirv-uploader", className), children: [
+  const themeClass = theme === "dark" ? "sirv-uploader--dark" : theme === "light" ? "sirv-uploader--light" : void 0;
+  return /* @__PURE__ */ jsxs("div", { className: clsx2("sirv-uploader", themeClass, className), children: [
     showTabs && /* @__PURE__ */ jsxs("div", { className: "sirv-tabs", children: [
       /* @__PURE__ */ jsx(
         "button",

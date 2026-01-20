@@ -325,6 +325,15 @@ export interface SirvUploaderProps {
   compact?: boolean
 
   /**
+   * Color theme.
+   * - 'auto': Follow system preference (default)
+   * - 'light': Force light mode
+   * - 'dark': Force dark mode
+   * @default 'auto'
+   */
+  theme?: 'auto' | 'light' | 'dark'
+
+  /**
    * Custom labels for i18n.
    */
   labels?: Partial<SirvUploaderLabels>

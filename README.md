@@ -10,6 +10,7 @@ A React file upload widget for [Sirv CDN](https://sirv.com) with batch uploads, 
 - **Sirv file picker** to browse existing files
 - **HEIC/HEIF conversion** for iPhone photos
 - **Presigned URL support** for secure direct uploads
+- **Dark mode** with automatic system preference detection
 - **Customizable styling** via CSS variables
 - **TypeScript** support with full type definitions
 
@@ -98,6 +99,7 @@ export default function UploadPage() {
 | `onConflict` | `'overwrite' \| 'rename' \| 'skip' \| 'ask'` | `'rename'` | Filename conflict handling |
 | `disabled` | `boolean` | `false` | Disable the widget |
 | `compact` | `boolean` | `false` | Compact mode for smaller spaces |
+| `theme` | `'auto' \| 'light' \| 'dark'` | `'auto'` | Color theme (auto follows system preference) |
 | `labels` | `object` | - | Custom labels for i18n |
 | `className` | `string` | - | Custom CSS class |
 
@@ -112,6 +114,25 @@ features?: {
 }
 ```
 
+## Dark Mode
+
+The widget supports dark mode out of the box with three options:
+
+```tsx
+// Auto (default) - follows system preference
+<SirvUploader theme="auto" ... />
+
+// Force light mode
+<SirvUploader theme="light" ... />
+
+// Force dark mode
+<SirvUploader theme="dark" ... />
+```
+
+Dark mode automatically activates when:
+- `theme="auto"` (default) and the user's system prefers dark mode
+- `theme="dark"` is explicitly set
+
 ## Styling
 
 Customize the widget using CSS variables:
@@ -125,6 +146,19 @@ Customize the widget using CSS variables:
   --sirv-border: #e2e8f0;
   --sirv-radius: 8px;
   /* ... see styles.css for all variables */
+}
+```
+
+For dark mode customization, override the dark theme variables:
+
+```css
+@media (prefers-color-scheme: dark) {
+  .sirv-uploader {
+    --sirv-primary: #3b82f6;
+    --sirv-bg: #1e1e1e;
+    --sirv-text: #e5e5e5;
+    /* ... */
+  }
 }
 ```
 

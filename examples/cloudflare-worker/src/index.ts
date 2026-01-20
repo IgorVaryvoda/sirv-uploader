@@ -34,34 +34,56 @@ interface PresignRequest {
   size?: number
 }
 
-// CORS headers
-const corsHeaders = (origin: string, allowedOrigins?: string) => {
-  const allowed = allowedOrigins?.split(',').map(o => o.trim()) || ['*']
-  const isAllowed = allowed.includes('*') || allowed.includes(origin)
+// CORS headers helper
+const getCorsHeaders = (origin: string | null, allowedOrigins?: string): HeadersInit => {
+  // If no allowed origins specified, allow all
+  if (!allowedOrigins) {
+    return {
+      'Access-Control-Allow-Origin': origin || '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
+      'Access-Control-Max-Age': '86400',
+    }
+  }
+
+  // Check if origin is in allowed list
+  const allowed = allowedOrigins.split(',').map(o => o.trim())
+  const isAllowed = origin && allowed.includes(origin)
 
   return {
     'Access-Control-Allow-Origin': isAllowed ? origin : allowed[0],
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With',
     'Access-Control-Max-Age': '86400',
   }
+}
+
+// Handle CORS preflight
+const handleOptions = (request: Request, env: Env): Response => {
+  const origin = request.headers.get('Origin')
+  return new Response(null, {
+    status: 204,
+    headers: getCorsHeaders(origin, env.ALLOWED_ORIGINS),
+  })
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url)
-    const origin = request.headers.get('Origin') || '*'
+    const origin = request.headers.get('Origin')
+    const corsHeaders = getCorsHeaders(origin, env.ALLOWED_ORIGINS)
 
-    // Handle CORS preflight
+    // Handle CORS preflight for any path
     if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: corsHeaders(origin, env.ALLOWED_ORIGINS),
-      })
+      return handleOptions(request, env)
     }
 
     // Only accept POST to /presign
     if (request.method !== 'POST' || !url.pathname.endsWith('/presign')) {
-      return new Response('Not Found', { status: 404 })
+      return new Response('Not Found', {
+        status: 404,
+        headers: corsHeaders,
+      })
     }
 
     try {
@@ -72,7 +94,7 @@ export default {
       if (!filename || !contentType) {
         return Response.json(
           { error: 'Missing required fields: filename, contentType' },
-          { status: 400, headers: corsHeaders(origin, env.ALLOWED_ORIGINS) }
+          { status: 400, headers: corsHeaders }
         )
       }
 
@@ -81,7 +103,7 @@ export default {
       if (size && size > maxSize) {
         return Response.json(
           { error: `File too large. Maximum size is ${maxSize / 1024 / 1024}MB` },
-          { status: 400, headers: corsHeaders(origin, env.ALLOWED_ORIGINS) }
+          { status: 400, headers: corsHeaders }
         )
       }
 
@@ -93,7 +115,7 @@ export default {
       if (!allowedTypes.includes(contentType)) {
         return Response.json(
           { error: `Invalid content type. Allowed: ${allowedTypes.join(', ')}` },
-          { status: 400, headers: corsHeaders(origin, env.ALLOWED_ORIGINS) }
+          { status: 400, headers: corsHeaders }
         )
       }
 
@@ -134,13 +156,13 @@ export default {
           publicUrl,
           path: '/' + key,
         },
-        { headers: corsHeaders(origin, env.ALLOWED_ORIGINS) }
+        { headers: corsHeaders }
       )
     } catch (error) {
       console.error('Presign error:', error)
       return Response.json(
         { error: 'Failed to generate upload URL' },
-        { status: 500, headers: corsHeaders(origin, env.ALLOWED_ORIGINS) }
+        { status: 500, headers: corsHeaders }
       )
     }
   },

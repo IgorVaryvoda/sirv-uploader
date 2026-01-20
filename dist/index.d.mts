@@ -265,6 +265,14 @@ interface SirvUploaderProps {
      */
     compact?: boolean;
     /**
+     * Color theme.
+     * - 'auto': Follow system preference (default)
+     * - 'light': Force light mode
+     * - 'dark': Force dark mode
+     * @default 'auto'
+     */
+    theme?: 'auto' | 'light' | 'dark';
+    /**
      * Custom labels for i18n.
      */
     labels?: Partial<SirvUploaderLabels>;
@@ -383,7 +391,7 @@ interface CsvParseResult {
     invalidCount: number;
 }
 
-declare function SirvUploader({ presignEndpoint, proxyEndpoint, sirvAccount, folder, onUpload, onError, onSelect, onRemove, features, maxFiles, maxFileSize, accept, onConflict, autoUpload, concurrency, className, disabled, compact, labels: customLabels, children, }: SirvUploaderProps): react_jsx_runtime.JSX.Element;
+declare function SirvUploader({ presignEndpoint, proxyEndpoint, sirvAccount, folder, onUpload, onError, onSelect, onRemove, features, maxFiles, maxFileSize, accept, onConflict, autoUpload, concurrency, className, disabled, compact, theme, labels: customLabels, children, }: SirvUploaderProps): react_jsx_runtime.JSX.Element;
 
 interface DropZoneProps {
     onFiles: (files: SirvFile[]) => void;
