@@ -4,7 +4,12 @@ A Cloudflare Worker that generates presigned URLs for direct uploads to Sirv CDN
 
 ## Deploy
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IgorVaryvoda/sirv-uploader/tree/main/examples/cloudflare-worker)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IgorVaryvoda/sirv-uploader/tree/main/examples/cloudflare-worker&secret[SIRV_S3_KEY]&secret[SIRV_S3_SECRET]&var[SIRV_BUCKET])
+
+The deploy process will prompt you for:
+- **SIRV_BUCKET** - Your Sirv account name (e.g., `mycompany`)
+- **SIRV_S3_KEY** - S3 Access Key from [Sirv Dashboard](https://my.sirv.com/#/account/settings/api)
+- **SIRV_S3_SECRET** - S3 Secret Key from [Sirv Dashboard](https://my.sirv.com/#/account/settings/api)
 
 ## Manual Setup
 
