@@ -1,0 +1,14 @@
+name = "sirv-upload-presign"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+# Set your Sirv bucket name here
+SIRV_BUCKET = "your-sirv-account"
+
+# Optionally restrict to specific origins (comma-separated)
+# ALLOWED_ORIGINS = "https://yoursite.com,https://app.yoursite.com"
+
+# Secrets (set via `wrangler secret put`):
+# - SIRV_S3_KEY
+# - SIRV_S3_SECRET

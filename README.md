@@ -157,7 +157,14 @@ import type {
 
 ## Backend Examples
 
+### Cloudflare Workers (One-Click Deploy)
+
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/IgorVaryvoda/sirv-uploader/tree/main/examples/cloudflare-worker)
+
+### Other Examples
+
 See the `/examples` folder for:
+- `cloudflare-worker/` - Cloudflare Workers (with deploy button)
 - `nextjs-presign.ts` - Next.js API route
 - `express-presign.ts` - Express.js server
 
