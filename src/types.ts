@@ -11,6 +11,8 @@ export interface ImageDimensions {
   height: number
 }
 
+export type FileCategory = 'image' | 'video' | '3d' | 'pdf' | 'other'
+
 export interface SirvFile {
   id: string
   file?: File
@@ -18,8 +20,14 @@ export interface SirvFile {
   previewUrl: string
   sirvUrl?: string
   sirvPath?: string
+  /** External URL (for Dropbox/Google Drive imports) */
+  externalUrl?: string
+  /** Access token for external URL (for Google Drive) */
+  externalAccessToken?: string
   dimensions?: ImageDimensions
   size?: number
+  /** File category for display purposes */
+  fileCategory?: FileCategory
   status: UploadStatus
   progress: number
   error?: string
@@ -203,6 +211,20 @@ export interface CheckResponse {
 // Component Props
 // -----------------------------------------------------------------------------
 
+export interface DropboxConfig {
+  /** Dropbox App Key - get from https://www.dropbox.com/developers/apps */
+  appKey: string
+}
+
+export interface GoogleDriveConfig {
+  /** Google OAuth Client ID */
+  clientId: string
+  /** Google API Key (for Picker) */
+  apiKey: string
+  /** Google App ID */
+  appId: string
+}
+
 export interface SirvUploaderProps {
   /**
    * RECOMMENDED: Endpoint to get presigned upload URLs.
@@ -267,7 +289,23 @@ export interface SirvUploaderProps {
     filePicker?: boolean
     /** Enable drag and drop. @default true */
     dragDrop?: boolean
+    /** Enable clipboard paste. @default true */
+    paste?: boolean
+    /** Accept all asset types (images, videos, 3D, PDF). @default false */
+    allAssets?: boolean
   }
+
+  /**
+   * Dropbox integration configuration.
+   * Omit to disable Dropbox import.
+   */
+  dropbox?: DropboxConfig
+
+  /**
+   * Google Drive integration configuration.
+   * Omit to disable Google Drive import.
+   */
+  googleDrive?: GoogleDriveConfig
 
   /**
    * Maximum number of files for batch upload.
@@ -299,6 +337,7 @@ export interface SirvUploaderProps {
 
   /**
    * Auto-upload files immediately after selection.
+   * Set to false to show staged files grid before upload.
    * @default true
    */
   autoUpload?: boolean
@@ -347,22 +386,30 @@ export interface SirvUploaderProps {
 export interface SirvUploaderLabels {
   dropzone: string
   dropzoneHint: string
+  pasteHint: string
   browse: string
   uploadFiles: string
   importUrls: string
   selectFromSirv: string
+  importFromDropbox: string
+  importFromGoogleDrive: string
   uploading: string
   processing: string
   success: string
   error: string
   retry: string
   remove: string
+  edit: string
+  addMore: string
+  clearAll: string
+  upload: string
   cancel: string
   overwrite: string
   rename: string
   skip: string
   conflictTitle: string
   conflictMessage: string
+  filesSelected: string
 }
 
 // -----------------------------------------------------------------------------

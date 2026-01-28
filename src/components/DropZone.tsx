@@ -1,13 +1,19 @@
-import { useCallback, useState, useRef } from 'react'
+import { useCallback, useState, useRef, useEffect } from 'react'
 import clsx from 'clsx'
 import {
   isImageFile,
   isHeifFile,
+  isVideoFile,
+  is3DModelFile,
+  isPdfFile,
+  canPreviewFile,
+  getFileCategory,
   convertHeicWithFallback,
   validateFileSize,
   generateId,
   getImageDimensions,
   ACCEPTED_IMAGE_FORMATS,
+  ACCEPTED_ALL_FORMATS,
 } from '../utils/image-utils'
 import { isSpreadsheetFile } from '../utils/csv-parser'
 import type { SirvFile } from '../types'
@@ -20,11 +26,16 @@ export interface DropZoneProps {
   maxFileSize?: number
   disabled?: boolean
   compact?: boolean
+  /** Enable clipboard paste support */
+  enablePaste?: boolean
+  /** Accept all asset types (images, videos, 3D, PDF) */
+  acceptAllAssets?: boolean
   className?: string
   labels?: {
     dropzone?: string
     dropzoneHint?: string
     browse?: string
+    pasteHint?: string
   }
   children?: React.ReactNode
 }
@@ -37,6 +48,8 @@ export function DropZone({
   maxFileSize = 10 * 1024 * 1024,
   disabled = false,
   compact = false,
+  enablePaste = true,
+  acceptAllAssets = false,
   className,
   labels = {},
   children,
@@ -45,6 +58,15 @@ export function DropZone({
   const [isConverting, setIsConverting] = useState(false)
   const [convertingCount, setConvertingCount] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Check if a file is acceptable based on settings
+  const isAcceptableFile = useCallback((file: File): boolean => {
+    if (acceptAllAssets) {
+      return isImageFile(file) || isVideoFile(file) || is3DModelFile(file) || isPdfFile(file)
+    }
+    return isImageFile(file)
+  }, [acceptAllAssets])
 
   const processFiles = useCallback(
     async (fileList: FileList | File[]) => {
@@ -57,9 +79,13 @@ export function DropZone({
         return
       }
 
-      // Filter to image files only
-      const imageFiles = files.filter(isImageFile)
-      if (imageFiles.length === 0) return
+      // Filter to acceptable files
+      const acceptableFiles = files.filter(isAcceptableFile)
+      if (acceptableFiles.length === 0) return
+
+      // Separate image files that need processing from other files
+      const imageFiles = acceptableFiles.filter(f => isImageFile(f))
+      const otherFiles = acceptableFiles.filter(f => !isImageFile(f))
 
       // Check for HEIF files that need conversion
       const heifFiles = imageFiles.filter(isHeifFile)
@@ -142,6 +168,35 @@ export function DropZone({
         setConvertingCount((c) => c - 1)
       }
 
+      // Process non-image files (videos, 3D, PDFs)
+      for (const file of otherFiles) {
+        const sizeValidation = validateFileSize(file, maxFileSize)
+        if (!sizeValidation.valid) {
+          processedFiles.push({
+            id: generateId(),
+            file,
+            filename: file.name,
+            previewUrl: '',
+            fileCategory: getFileCategory(file),
+            status: 'error',
+            progress: 0,
+            error: sizeValidation.error,
+          })
+          continue
+        }
+
+        processedFiles.push({
+          id: generateId(),
+          file,
+          filename: file.name,
+          previewUrl: '', // No preview for non-image files
+          fileCategory: getFileCategory(file),
+          size: file.size,
+          status: 'pending',
+          progress: 0,
+        })
+      }
+
       setIsConverting(false)
       setConvertingCount(0)
 
@@ -149,8 +204,47 @@ export function DropZone({
         onFiles(processedFiles)
       }
     },
-    [maxFiles, maxFileSize, onFiles, onSpreadsheet]
+    [maxFiles, maxFileSize, onFiles, onSpreadsheet, isAcceptableFile]
   )
+
+  // Clipboard paste handler
+  useEffect(() => {
+    if (!enablePaste || disabled) return
+
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      const files: File[] = []
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.kind === 'file') {
+          const file = item.getAsFile()
+          if (file) {
+            // For pasted images without a proper filename
+            if (item.type.startsWith('image/') && !file.name.includes('.')) {
+              const timestamp = Date.now()
+              const ext = item.type.split('/')[1] || 'png'
+              const namedFile = new File([file], `pasted-image-${timestamp}.${ext}`, {
+                type: file.type,
+              })
+              files.push(namedFile)
+            } else {
+              files.push(file)
+            }
+          }
+        }
+      }
+
+      if (files.length > 0) {
+        e.preventDefault()
+        await processFiles(files)
+      }
+    }
+
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [enablePaste, disabled, processFiles])
 
   const handleDragOver = useCallback(
     (e: React.DragEvent) => {
@@ -213,16 +307,20 @@ export function DropZone({
     [disabled]
   )
 
-  const acceptString = accept.join(',') || ACCEPTED_IMAGE_FORMATS
+  const acceptString = acceptAllAssets
+    ? ACCEPTED_ALL_FORMATS
+    : (accept.join(',') || ACCEPTED_IMAGE_FORMATS)
 
   return (
     <div
+      ref={containerRef}
       className={clsx(
         'sirv-dropzone',
         isDragOver && 'sirv-dropzone--drag-over',
         disabled && 'sirv-dropzone--disabled',
         compact && 'sirv-dropzone--compact',
         isConverting && 'sirv-dropzone--converting',
+        enablePaste && 'sirv-dropzone--paste-enabled',
         className
       )}
       onDragOver={handleDragOver}
@@ -274,9 +372,19 @@ export function DropZone({
                 {labels.dropzone || 'Drop files here or click to browse'}
               </p>
               {!compact && (
-                <p className="sirv-dropzone__hint">
-                  {labels.dropzoneHint || 'Supports JPG, PNG, WebP, GIF, HEIC up to 10MB'}
-                </p>
+                <>
+                  <p className="sirv-dropzone__hint">
+                    {labels.dropzoneHint || (acceptAllAssets
+                      ? 'Supports images, videos, 3D models, and PDFs'
+                      : 'Supports JPG, PNG, WebP, GIF, HEIC up to 10MB'
+                    )}
+                  </p>
+                  {enablePaste && (
+                    <p className="sirv-dropzone__paste-hint">
+                      {labels.pasteHint || 'You can also paste images from clipboard'}
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}

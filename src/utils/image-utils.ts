@@ -1,19 +1,68 @@
 /**
- * Image utility functions for the Sirv Upload Widget
+ * File utility functions for the Sirv Upload Widget
  */
 
 const HEIC_TYPES = ['image/heic', 'image/heif']
-const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif)$/i
+const IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif|svg)$/i
+const VIDEO_EXTENSIONS = /\.(mp4|webm|mov|avi|mkv|m4v|ogv)$/i
+const MODEL_3D_EXTENSIONS = /\.(glb|gltf|obj|fbx|usdz|stl)$/i
+const PDF_EXTENSION = /\.pdf$/i
 
 export const ACCEPTED_IMAGE_FORMATS =
-  'image/jpeg,image/png,image/gif,image/webp,image/bmp,image/tiff,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif'
+  'image/jpeg,image/png,image/gif,image/webp,image/bmp,image/tiff,image/heic,image/heif,image/avif,image/svg+xml,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.svg'
+
+export const ACCEPTED_VIDEO_FORMATS =
+  'video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.mp4,.webm,.mov,.avi,.mkv,.m4v,.ogv'
+
+export const ACCEPTED_3D_FORMATS =
+  'model/gltf-binary,model/gltf+json,.glb,.gltf,.obj,.fbx,.usdz,.stl'
+
+export const ACCEPTED_ALL_FORMATS =
+  `${ACCEPTED_IMAGE_FORMATS},${ACCEPTED_VIDEO_FORMATS},${ACCEPTED_3D_FORMATS},application/pdf,.pdf`
 
 export const DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024 // 10MB
 
 export function isImageFile(file: File): boolean {
-  if (file.type.startsWith('image/')) return true
-  if (IMAGE_EXTENSIONS.test(file.name)) return true
+  if (file.type.startsWith('image/') && !file.type.includes('svg')) return true
+  if (IMAGE_EXTENSIONS.test(file.name) && !file.name.toLowerCase().endsWith('.svg')) return true
   return false
+}
+
+export function isSvgFile(file: File): boolean {
+  return file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg')
+}
+
+export function isVideoFile(file: File): boolean {
+  if (file.type.startsWith('video/')) return true
+  if (VIDEO_EXTENSIONS.test(file.name)) return true
+  return false
+}
+
+export function is3DModelFile(file: File): boolean {
+  const ext = file.name.toLowerCase().split('.').pop()
+  return MODEL_3D_EXTENSIONS.test(file.name) || ['glb', 'gltf', 'obj', 'fbx', 'usdz', 'stl'].includes(ext || '')
+}
+
+export function isPdfFile(file: File): boolean {
+  return file.type === 'application/pdf' || PDF_EXTENSION.test(file.name)
+}
+
+/**
+ * Check if a file can have a visual preview generated
+ */
+export function canPreviewFile(file: File): boolean {
+  return isImageFile(file) && !isSvgFile(file)
+}
+
+/**
+ * Get the file category for display purposes
+ */
+export function getFileCategory(file: File): 'image' | 'video' | '3d' | 'pdf' | 'other' {
+  if (isImageFile(file) || isSvgFile(file)) return 'image'
+  if (isVideoFile(file)) return 'video'
+  if (is3DModelFile(file)) return '3d'
+  if (isPdfFile(file)) return 'pdf'
+  return 'other'
 }
 
 export function isHeifFile(file: File): boolean {
