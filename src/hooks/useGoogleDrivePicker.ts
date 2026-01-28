@@ -1,4 +1,4 @@
-import { useCallback, useState, useRef } from 'react'
+import { useCallback, useState, useRef, useEffect } from 'react'
 
 declare global {
   interface Window {
@@ -21,7 +21,7 @@ declare global {
           initTokenClient: (config: {
             client_id: string
             scope: string
-            callback: (response: { access_token?: string; error?: string }) => void
+            callback: (response: { access_token?: string; error?: string; expires_in?: number }) => void
           }) => { requestAccessToken: () => void }
         }
       }
@@ -30,6 +30,7 @@ declare global {
         ViewId: { DOCS: string }
         DocsView: new (viewId?: string) => GoogleDocsView
         Action: { PICKED: string; CANCEL: string }
+        Feature: { MULTISELECT_ENABLED: number }
       }
     }
   }
@@ -42,6 +43,7 @@ interface GooglePickerBuilder {
   setAppId: (appId: string) => GooglePickerBuilder
   setCallback: (callback: (data: GooglePickerResponse) => void) => GooglePickerBuilder
   enableFeature: (feature: number) => GooglePickerBuilder
+  setOrigin: (origin: string) => GooglePickerBuilder
   build: () => { setVisible: (visible: boolean) => void }
 }
 
@@ -82,6 +84,8 @@ export interface UseGoogleDrivePickerOptions {
 }
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file'
+const STORAGE_KEY = 'sirv_gdrive_picker_token'
+const TOKEN_EXPIRY_KEY = 'sirv_gdrive_picker_token_expiry'
 
 const DEFAULT_MIME_TYPES = [
   'image/jpeg',
@@ -102,6 +106,47 @@ const DEFAULT_MIME_TYPES = [
   'application/pdf',
 ].join(',')
 
+function getStoredToken(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const token = localStorage.getItem(STORAGE_KEY)
+    const expiry = localStorage.getItem(TOKEN_EXPIRY_KEY)
+    if (token && expiry) {
+      const expiryTime = parseInt(expiry, 10)
+      // Return token if it's still valid (with 1 minute buffer)
+      if (Date.now() < expiryTime - 60000) {
+        return token
+      }
+      // Token expired, clear it
+      localStorage.removeItem(STORAGE_KEY)
+      localStorage.removeItem(TOKEN_EXPIRY_KEY)
+    }
+  } catch {
+    // localStorage not available
+  }
+  return null
+}
+
+function storeToken(token: string, expiresIn: number = 3600): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(STORAGE_KEY, token)
+    localStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + expiresIn * 1000))
+  } catch {
+    // localStorage not available
+  }
+}
+
+function clearStoredToken(): void {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(TOKEN_EXPIRY_KEY)
+  } catch {
+    // localStorage not available
+  }
+}
+
 export function useGoogleDrivePicker({
   clientId,
   apiKey,
@@ -113,10 +158,27 @@ export function useGoogleDrivePicker({
 }: UseGoogleDrivePickerOptions) {
   const [isLoading, setIsLoading] = useState(false)
   const [isReady, setIsReady] = useState(false)
+  const [hasSession, setHasSession] = useState(false)
   const accessTokenRef = useRef<string | null>(null)
   const pickerInitedRef = useRef(false)
 
   const isConfigured = !!(clientId && apiKey && appId)
+
+  // Load stored token on mount
+  useEffect(() => {
+    const storedToken = getStoredToken()
+    if (storedToken) {
+      accessTokenRef.current = storedToken
+      setHasSession(true)
+    }
+  }, [])
+
+  // Clear stored session
+  const clearSession = useCallback(() => {
+    clearStoredToken()
+    accessTokenRef.current = null
+    setHasSession(false)
+  }, [])
 
   const loadGoogleScripts = useCallback(async () => {
     // Load GSI script (Google Identity Services)
@@ -159,18 +221,24 @@ export function useGoogleDrivePicker({
   }, [])
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
+    // Try to use stored token first
     if (accessTokenRef.current) {
       return accessTokenRef.current
     }
 
+    // Request new token via OAuth
     return new Promise((resolve) => {
       const tokenClient = window.google!.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: SCOPE,
         callback: (response) => {
           if (response.access_token) {
-            accessTokenRef.current = response.access_token
-            resolve(response.access_token)
+            const token = response.access_token
+            const expiresIn = response.expires_in || 3600
+            accessTokenRef.current = token
+            storeToken(token, expiresIn)
+            setHasSession(true)
+            resolve(token)
           } else {
             console.error('Google OAuth error:', response.error)
             resolve(null)
@@ -196,6 +264,7 @@ export function useGoogleDrivePicker({
         .setOAuthToken(accessToken)
         .setDeveloperKey(apiKey)
         .setAppId(appId)
+        .setOrigin(window.location.origin)
         .setCallback((data: GooglePickerResponse) => {
           if (data.action === window.google!.picker!.Action.PICKED) {
             setIsLoading(false)
@@ -208,9 +277,11 @@ export function useGoogleDrivePicker({
           }
         })
 
-      // Enable multiselect feature (feature value is 1)
-      if (multiselect) {
-        picker.enableFeature(1)
+      // Enable multiselect feature
+      if (multiselect && window.google.picker.Feature?.MULTISELECT_ENABLED) {
+        picker.enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED)
+      } else if (multiselect) {
+        picker.enableFeature(1) // Fallback feature value
       }
 
       const pickerInstance = picker.build()
@@ -250,5 +321,9 @@ export function useGoogleDrivePicker({
     isReady,
     /** Whether the picker is configured */
     isConfigured,
+    /** Whether we have a stored session */
+    hasSession,
+    /** Clear stored session to force re-authentication */
+    clearSession,
   }
 }
