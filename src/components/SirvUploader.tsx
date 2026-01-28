@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import clsx from 'clsx'
 import { DropZone } from './DropZone'
 import { FileList, FileListSummary } from './FileList'
@@ -105,6 +105,8 @@ export function SirvUploader({
   const [activeTab, setActiveTab] = useState<TabMode>('upload')
   const [isPickerOpen, setIsPickerOpen] = useState(false)
   const [stagedFiles, setStagedFiles] = useState<SirvFile[]>([])
+  const [isImporting, setIsImporting] = useState(false)
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0, source: '' })
 
   // Determine if we should show staged mode (when autoUpload is false)
   const showStagedMode = !autoUpload && stagedFiles.length > 0
@@ -151,32 +153,89 @@ export function SirvUploader({
     setActiveTab('urls')
   }, [])
 
-  // Handle URLs from spreadsheet
+  // Download external file and create a staged SirvFile
+  const downloadAndStageFile = useCallback(async (
+    url: string,
+    filename: string,
+    accessToken?: string
+  ): Promise<SirvFile | null> => {
+    try {
+      const headers: HeadersInit = {}
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`
+      }
+      const response = await fetch(url, { headers })
+      if (!response.ok) throw new Error('Download failed')
+      const blob = await response.blob()
+      const file = new File([blob], filename, { type: blob.type || 'image/png' })
+      return {
+        id: generateId(),
+        file,
+        filename,
+        previewUrl: URL.createObjectURL(blob),
+        size: blob.size,
+        status: 'pending' as const,
+        progress: 0,
+      }
+    } catch (err) {
+      console.error(`Failed to download ${filename}:`, err)
+      return null
+    }
+  }, [])
+
+  // Handle URLs from spreadsheet - download and stage files
   const handleUrls = useCallback(
-    (urls: string[]) => {
-      upload.addUrls(urls)
+    async (urls: string[]) => {
+      const validUrls = urls.slice(0, maxFiles)
+      if (validUrls.length === 0) return
+
+      setIsImporting(true)
+      setImportProgress({ current: 0, total: validUrls.length, source: 'URLs' })
+
+      const newFiles: SirvFile[] = []
+      for (let i = 0; i < validUrls.length; i++) {
+        const url = validUrls[i]
+        setImportProgress({ current: i + 1, total: validUrls.length, source: 'URLs' })
+        const filename = url.split('/').pop()?.split('?')[0] || `image-${i + 1}.png`
+        const staged = await downloadAndStageFile(url, filename)
+        if (staged) newFiles.push(staged)
+      }
+
+      setIsImporting(false)
+      setImportProgress({ current: 0, total: 0, source: '' })
+
+      if (newFiles.length > 0) {
+        handleFiles(newFiles)
+        setActiveTab('upload')
+      }
     },
-    [upload]
+    [maxFiles, downloadAndStageFile, handleFiles]
   )
 
-  // Handle file picker selection
+  // Handle file picker selection - download and stage for consistency
   const handlePickerSelect = useCallback(
-    (items: BrowseItem[]) => {
-      const files: SirvFile[] = items.map((item) => ({
-        id: generateId(),
-        filename: item.name,
-        previewUrl: item.thumbnail || '',
-        sirvUrl: `https://${sirvAccount}.sirv.com${item.path}`,
-        sirvPath: item.path,
-        size: item.size,
-        status: 'success' as const,
-        progress: 100,
-      }))
+    async (items: BrowseItem[]) => {
+      setIsPickerOpen(false)
+      setIsImporting(true)
+      setImportProgress({ current: 0, total: items.length, source: 'Sirv' })
 
-      upload.addFiles(files)
-      onSelect?.(files)
+      const newFiles: SirvFile[] = []
+      for (let i = 0; i < items.slice(0, maxFiles).length; i++) {
+        const item = items[i]
+        setImportProgress({ current: i + 1, total: items.length, source: 'Sirv' })
+        const url = `https://${sirvAccount}.sirv.com${item.path}`
+        const staged = await downloadAndStageFile(url, item.name)
+        if (staged) newFiles.push(staged)
+      }
+
+      setIsImporting(false)
+      setImportProgress({ current: 0, total: 0, source: '' })
+
+      if (newFiles.length > 0) {
+        handleFiles(newFiles)
+      }
     },
-    [sirvAccount, upload, onSelect]
+    [sirvAccount, maxFiles, downloadAndStageFile, handleFiles]
   )
 
   // Handle file removal (both staged and uploaded)
@@ -222,42 +281,56 @@ export function SirvUploader({
     }
   }, [upload, showStagedMode])
 
-  // Dropbox integration
+  // Dropbox integration - download and stage files
   const dropboxChooser = useDropboxChooser({
     appKey: dropbox?.appKey || '',
-    onSelect: (files: DropboxFile[]) => {
-      const sirvFiles: SirvFile[] = files.map((f) => ({
-        id: generateId(),
-        filename: f.name,
-        previewUrl: f.thumbnailLink || '',
-        externalUrl: f.link,
-        size: f.bytes,
-        status: 'pending' as const,
-        progress: 0,
-      }))
-      handleFiles(sirvFiles)
-      setActiveTab('upload')
+    onSelect: async (files: DropboxFile[]) => {
+      setIsImporting(true)
+      setImportProgress({ current: 0, total: files.length, source: 'Dropbox' })
+
+      const newFiles: SirvFile[] = []
+      for (let i = 0; i < files.slice(0, maxFiles).length; i++) {
+        const f = files[i]
+        setImportProgress({ current: i + 1, total: files.length, source: 'Dropbox' })
+        const staged = await downloadAndStageFile(f.link, f.name)
+        if (staged) newFiles.push(staged)
+      }
+
+      setIsImporting(false)
+      setImportProgress({ current: 0, total: 0, source: '' })
+
+      if (newFiles.length > 0) {
+        handleFiles(newFiles)
+        setActiveTab('upload')
+      }
     },
   })
 
-  // Google Drive integration
+  // Google Drive integration - download and stage files
   const googleDrivePicker = useGoogleDrivePicker({
     clientId: googleDrive?.clientId || '',
     apiKey: googleDrive?.apiKey || '',
     appId: googleDrive?.appId || '',
-    onSelect: (files: GoogleDriveFile[], accessToken: string) => {
-      const sirvFiles: SirvFile[] = files.map((f) => ({
-        id: generateId(),
-        filename: f.name,
-        previewUrl: f.thumbnails?.[0]?.url || f.iconUrl || '',
-        externalUrl: `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,
-        externalAccessToken: accessToken,
-        size: f.sizeBytes,
-        status: 'pending' as const,
-        progress: 0,
-      }))
-      handleFiles(sirvFiles)
-      setActiveTab('upload')
+    onSelect: async (files: GoogleDriveFile[], accessToken: string) => {
+      setIsImporting(true)
+      setImportProgress({ current: 0, total: files.length, source: 'Google Drive' })
+
+      const newFiles: SirvFile[] = []
+      for (let i = 0; i < files.slice(0, maxFiles).length; i++) {
+        const f = files[i]
+        setImportProgress({ current: i + 1, total: files.length, source: 'Google Drive' })
+        const downloadUrl = `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`
+        const staged = await downloadAndStageFile(downloadUrl, f.name, accessToken)
+        if (staged) newFiles.push(staged)
+      }
+
+      setIsImporting(false)
+      setImportProgress({ current: 0, total: 0, source: '' })
+
+      if (newFiles.length > 0) {
+        handleFiles(newFiles)
+        setActiveTab('upload')
+      }
     },
   })
 
@@ -390,8 +463,21 @@ export function SirvUploader({
         <SpreadsheetImport onUrls={handleUrls} />
       )}
 
+      {/* Import Progress Overlay */}
+      {isImporting && (
+        <div className="sirv-uploader__import-progress">
+          <div className="sirv-uploader__import-spinner" />
+          <p className="sirv-uploader__import-text">
+            Importing from {importProgress.source}...
+          </p>
+          <p className="sirv-uploader__import-count">
+            {importProgress.current} / {importProgress.total}
+          </p>
+        </div>
+      )}
+
       {/* Dropbox Tab */}
-      {activeTab === 'dropbox' && hasDropbox && (
+      {activeTab === 'dropbox' && hasDropbox && !isImporting && (
         <div className="sirv-uploader__external-picker">
           <div className="sirv-uploader__external-icon sirv-uploader__external-icon--dropbox">
             <DropboxIcon />
@@ -412,7 +498,7 @@ export function SirvUploader({
       )}
 
       {/* Google Drive Tab */}
-      {activeTab === 'gdrive' && hasGoogleDrive && (
+      {activeTab === 'gdrive' && hasGoogleDrive && !isImporting && (
         <div className="sirv-uploader__external-picker">
           <div className="sirv-uploader__external-icon sirv-uploader__external-icon--gdrive">
             <GoogleDriveIcon />

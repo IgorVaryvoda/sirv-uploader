@@ -4,6 +4,7 @@ interface ImageDimensions {
     width: number;
     height: number;
 }
+type FileCategory = 'image' | 'video' | '3d' | 'pdf' | 'other';
 interface SirvFile {
     id: string;
     file?: File;
@@ -11,8 +12,14 @@ interface SirvFile {
     previewUrl: string;
     sirvUrl?: string;
     sirvPath?: string;
+    /** External URL (for Dropbox/Google Drive imports) */
+    externalUrl?: string;
+    /** Access token for external URL (for Google Drive) */
+    externalAccessToken?: string;
     dimensions?: ImageDimensions;
     size?: number;
+    /** File category for display purposes */
+    fileCategory?: FileCategory;
     status: UploadStatus;
     progress: number;
     error?: string;
@@ -161,6 +168,18 @@ interface CheckResponse {
     /** Existing file info if exists */
     file?: BrowseItem;
 }
+interface DropboxConfig {
+    /** Dropbox App Key - get from https://www.dropbox.com/developers/apps */
+    appKey: string;
+}
+interface GoogleDriveConfig {
+    /** Google OAuth Client ID */
+    clientId: string;
+    /** Google API Key (for Picker) */
+    apiKey: string;
+    /** Google App ID */
+    appId: string;
+}
 interface SirvUploaderProps {
     /**
      * RECOMMENDED: Endpoint to get presigned upload URLs.
@@ -217,7 +236,21 @@ interface SirvUploaderProps {
         filePicker?: boolean;
         /** Enable drag and drop. @default true */
         dragDrop?: boolean;
+        /** Enable clipboard paste. @default true */
+        paste?: boolean;
+        /** Accept all asset types (images, videos, 3D, PDF). @default false */
+        allAssets?: boolean;
     };
+    /**
+     * Dropbox integration configuration.
+     * Omit to disable Dropbox import.
+     */
+    dropbox?: DropboxConfig;
+    /**
+     * Google Drive integration configuration.
+     * Omit to disable Google Drive import.
+     */
+    googleDrive?: GoogleDriveConfig;
     /**
      * Maximum number of files for batch upload.
      * @default 50
@@ -244,6 +277,7 @@ interface SirvUploaderProps {
     onConflict?: ConflictResolution | 'ask';
     /**
      * Auto-upload files immediately after selection.
+     * Set to false to show staged files grid before upload.
      * @default true
      */
     autoUpload?: boolean;
@@ -284,22 +318,30 @@ interface SirvUploaderProps {
 interface SirvUploaderLabels {
     dropzone: string;
     dropzoneHint: string;
+    pasteHint: string;
     browse: string;
     uploadFiles: string;
     importUrls: string;
     selectFromSirv: string;
+    importFromDropbox: string;
+    importFromGoogleDrive: string;
     uploading: string;
     processing: string;
     success: string;
     error: string;
     retry: string;
     remove: string;
+    edit: string;
+    addMore: string;
+    clearAll: string;
+    upload: string;
     cancel: string;
     overwrite: string;
     rename: string;
     skip: string;
     conflictTitle: string;
     conflictMessage: string;
+    filesSelected: string;
 }
 interface UseSirvUploadOptions$1 {
     endpoint: string;
@@ -391,7 +433,7 @@ interface CsvParseResult {
     invalidCount: number;
 }
 
-declare function SirvUploader({ presignEndpoint, proxyEndpoint, sirvAccount, folder, onUpload, onError, onSelect, onRemove, features, maxFiles, maxFileSize, accept, onConflict, autoUpload, concurrency, className, disabled, compact, theme, labels: customLabels, children, }: SirvUploaderProps): react_jsx_runtime.JSX.Element;
+declare function SirvUploader({ presignEndpoint, proxyEndpoint, sirvAccount, folder, onUpload, onError, onSelect, onRemove, features, dropbox, googleDrive, maxFiles, maxFileSize, accept, onConflict, autoUpload, concurrency, className, disabled, compact, theme, labels: customLabels, children, }: SirvUploaderProps): react_jsx_runtime.JSX.Element;
 
 interface DropZoneProps {
     onFiles: (files: SirvFile[]) => void;
@@ -401,15 +443,20 @@ interface DropZoneProps {
     maxFileSize?: number;
     disabled?: boolean;
     compact?: boolean;
+    /** Enable clipboard paste support */
+    enablePaste?: boolean;
+    /** Accept all asset types (images, videos, 3D, PDF) */
+    acceptAllAssets?: boolean;
     className?: string;
     labels?: {
         dropzone?: string;
         dropzoneHint?: string;
         browse?: string;
+        pasteHint?: string;
     };
     children?: React.ReactNode;
 }
-declare function DropZone({ onFiles, onSpreadsheet, accept, maxFiles, maxFileSize, disabled, compact, className, labels, children, }: DropZoneProps): react_jsx_runtime.JSX.Element;
+declare function DropZone({ onFiles, onSpreadsheet, accept, maxFiles, maxFileSize, disabled, compact, enablePaste, acceptAllAssets, className, labels, children, }: DropZoneProps): react_jsx_runtime.JSX.Element;
 
 interface FileListProps {
     files: SirvFile[];
@@ -432,6 +479,24 @@ interface FileListSummaryProps {
     className?: string;
 }
 declare function FileListSummary({ files, className }: FileListSummaryProps): react_jsx_runtime.JSX.Element | null;
+
+interface StagedFilesGridProps {
+    files: SirvFile[];
+    onRemove: (id: string) => void;
+    onEdit?: (file: SirvFile) => void;
+    onAddMore?: (files: SirvFile[]) => void;
+    maxFiles?: number;
+    accept?: string;
+    disabled?: boolean;
+    showFilenames?: boolean;
+    className?: string;
+    labels?: {
+        addMore?: string;
+        edit?: string;
+        remove?: string;
+    };
+}
+declare function StagedFilesGrid({ files, onRemove, onEdit, onAddMore, maxFiles, accept, disabled, showFilenames, className, labels, }: StagedFilesGridProps): react_jsx_runtime.JSX.Element;
 
 interface FilePickerProps {
     endpoint: string;
@@ -504,12 +569,208 @@ interface UseSirvUploadReturn {
 }
 declare function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadReturn;
 
+declare global {
+    interface Window {
+        Dropbox?: {
+            choose: (options: DropboxChooserOptions) => void;
+            isBrowserSupported: () => boolean;
+        };
+    }
+}
+interface DropboxChooserOptions {
+    success: (files: DropboxFile[]) => void;
+    cancel?: () => void;
+    linkType: 'preview' | 'direct';
+    multiselect: boolean;
+    extensions?: string[];
+    folderselect?: boolean;
+    sizeLimit?: number;
+}
+interface DropboxFile {
+    id: string;
+    name: string;
+    link: string;
+    bytes: number;
+    icon: string;
+    thumbnailLink?: string;
+    isDir: boolean;
+}
+interface UseDropboxChooserOptions {
+    /** Dropbox App Key - get from https://www.dropbox.com/developers/apps */
+    appKey: string;
+    /** Callback when files are selected */
+    onSelect: (files: DropboxFile[]) => void;
+    /** Callback when picker is cancelled */
+    onCancel?: () => void;
+    /** Allow multiple file selection */
+    multiselect?: boolean;
+    /** File extensions to filter by */
+    extensions?: string[];
+    /** Max file size in bytes */
+    maxSizeBytes?: number;
+}
+declare function useDropboxChooser({ appKey, onSelect, onCancel, multiselect, extensions, maxSizeBytes, }: UseDropboxChooserOptions): {
+    /** Open the Dropbox file chooser */
+    openChooser: () => void;
+    /** Loading state */
+    isLoading: boolean;
+    /** Whether Dropbox is supported in this browser */
+    isSupported: boolean;
+    /** Whether the picker is configured and ready to use */
+    isConfigured: boolean;
+    /** Whether the SDK has finished loading */
+    isReady: boolean;
+};
+
+declare global {
+    interface Window {
+        gapi?: {
+            load: (api: string, callback: () => void) => void;
+            client?: {
+                init: (config: {
+                    apiKey?: string;
+                    discoveryDocs?: string[];
+                }) => Promise<void>;
+            };
+            auth2?: {
+                getAuthInstance: () => {
+                    isSignedIn: {
+                        get: () => boolean;
+                    };
+                    signIn: (options?: {
+                        scope?: string;
+                    }) => Promise<{
+                        getAuthResponse: () => {
+                            access_token: string;
+                        };
+                    }>;
+                    currentUser: {
+                        get: () => {
+                            getAuthResponse: () => {
+                                access_token: string;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        google?: {
+            accounts: {
+                oauth2: {
+                    initTokenClient: (config: {
+                        client_id: string;
+                        scope: string;
+                        callback: (response: {
+                            access_token?: string;
+                            error?: string;
+                            expires_in?: number;
+                        }) => void;
+                    }) => {
+                        requestAccessToken: () => void;
+                    };
+                };
+            };
+            picker?: {
+                PickerBuilder: new () => GooglePickerBuilder;
+                ViewId: {
+                    DOCS: string;
+                };
+                DocsView: new (viewId?: string) => GoogleDocsView;
+                Action: {
+                    PICKED: string;
+                    CANCEL: string;
+                };
+                Feature: {
+                    MULTISELECT_ENABLED: number;
+                };
+            };
+        };
+    }
+}
+interface GooglePickerBuilder {
+    addView: (view: GoogleDocsView) => GooglePickerBuilder;
+    setOAuthToken: (token: string) => GooglePickerBuilder;
+    setDeveloperKey: (key: string) => GooglePickerBuilder;
+    setAppId: (appId: string) => GooglePickerBuilder;
+    setCallback: (callback: (data: GooglePickerResponse) => void) => GooglePickerBuilder;
+    enableFeature: (feature: number) => GooglePickerBuilder;
+    setOrigin: (origin: string) => GooglePickerBuilder;
+    build: () => {
+        setVisible: (visible: boolean) => void;
+    };
+}
+interface GoogleDocsView {
+    setMimeTypes: (types: string) => GoogleDocsView;
+}
+interface GooglePickerResponse {
+    action: string;
+    docs?: GoogleDriveFile[];
+}
+interface GoogleDriveFile {
+    id: string;
+    name: string;
+    mimeType: string;
+    sizeBytes?: number;
+    url?: string;
+    iconUrl?: string;
+    thumbnails?: Array<{
+        url: string;
+        width?: number;
+        height?: number;
+    }>;
+}
+interface UseGoogleDrivePickerOptions {
+    /** Google OAuth Client ID */
+    clientId: string;
+    /** Google API Key (for Picker) */
+    apiKey: string;
+    /** Google App ID */
+    appId: string;
+    /** Callback when files are selected */
+    onSelect: (files: GoogleDriveFile[], accessToken: string) => void;
+    /** Callback when picker is cancelled */
+    onCancel?: () => void;
+    /** Allow multiple file selection */
+    multiselect?: boolean;
+    /** MIME types to filter (comma-separated) */
+    mimeTypes?: string;
+}
+declare function useGoogleDrivePicker({ clientId, apiKey, appId, onSelect, onCancel, multiselect, mimeTypes, }: UseGoogleDrivePickerOptions): {
+    /** Open the Google Drive picker */
+    openPicker: () => Promise<void>;
+    /** Loading state */
+    isLoading: boolean;
+    /** Whether all APIs are loaded and ready */
+    isReady: boolean;
+    /** Whether the picker is configured */
+    isConfigured: boolean;
+    /** Whether we have a stored session */
+    hasSession: boolean;
+    /** Clear stored session to force re-authentication */
+    clearSession: () => void;
+};
+
 /**
- * Image utility functions for the Sirv Upload Widget
+ * File utility functions for the Sirv Upload Widget
  */
-declare const ACCEPTED_IMAGE_FORMATS = "image/jpeg,image/png,image/gif,image/webp,image/bmp,image/tiff,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif";
+declare const ACCEPTED_IMAGE_FORMATS = "image/jpeg,image/png,image/gif,image/webp,image/bmp,image/tiff,image/heic,image/heif,image/avif,image/svg+xml,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.svg";
+declare const ACCEPTED_VIDEO_FORMATS = "video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.mp4,.webm,.mov,.avi,.mkv,.m4v,.ogv";
+declare const ACCEPTED_3D_FORMATS = "model/gltf-binary,model/gltf+json,.glb,.gltf,.obj,.fbx,.usdz,.stl";
+declare const ACCEPTED_ALL_FORMATS = "image/jpeg,image/png,image/gif,image/webp,image/bmp,image/tiff,image/heic,image/heif,image/avif,image/svg+xml,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.svg,video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.mp4,.webm,.mov,.avi,.mkv,.m4v,.ogv,model/gltf-binary,model/gltf+json,.glb,.gltf,.obj,.fbx,.usdz,.stl,application/pdf,.pdf";
 declare const DEFAULT_MAX_FILE_SIZE: number;
 declare function isImageFile(file: File): boolean;
+declare function isSvgFile(file: File): boolean;
+declare function isVideoFile(file: File): boolean;
+declare function is3DModelFile(file: File): boolean;
+declare function isPdfFile(file: File): boolean;
+/**
+ * Check if a file can have a visual preview generated
+ */
+declare function canPreviewFile(file: File): boolean;
+/**
+ * Get the file category for display purposes
+ */
+declare function getFileCategory(file: File): 'image' | 'video' | '3d' | 'pdf' | 'other';
 declare function isHeifFile(file: File): boolean;
 /**
  * Convert HEIC with multiple fallback strategies:
@@ -579,4 +840,4 @@ declare function parseExcelClient(arrayBuffer: ArrayBuffer, options?: ParseOptio
  */
 declare function isSpreadsheetFile(file: File): boolean;
 
-export { ACCEPTED_IMAGE_FORMATS, type BrowseItem, type BrowseRequest, type BrowseResponse, type CheckRequest, type CheckResponse, type ClientParseResult, type ConflictInfo, type ConflictResolution, type CsvParseOptions, type CsvParseResult, DEFAULT_MAX_FILE_SIZE, type DeleteRequest, type DeleteResponse, DropZone, type DropZoneProps, FileList, type FileListProps, FileListSummary, FilePicker, type FilePickerProps, type ImageDimensions, type ParsedUrl, type ParsedUrlItem, type PresignRequest, type PresignResponse, type SirvFile, SirvUploader, type SirvUploaderLabels, type SirvUploaderProps, SpreadsheetImport, type SpreadsheetImportProps, type UploadRequest, type UploadResponse, type UploadStatus, type UrlValidator, type UseFilePickerOptions, type UseFilePickerReturn, type UseSirvUploadOptions$1 as UseSirvUploadOptions, type UseSirvUploadReturn$1 as UseSirvUploadReturn, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getImageDimensions, getMimeType, isHeifFile, isImageFile, isSpreadsheetFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useSirvUpload, validateFileSize };
+export { ACCEPTED_3D_FORMATS, ACCEPTED_ALL_FORMATS, ACCEPTED_IMAGE_FORMATS, ACCEPTED_VIDEO_FORMATS, type BrowseItem, type BrowseRequest, type BrowseResponse, type CheckRequest, type CheckResponse, type ClientParseResult, type ConflictInfo, type ConflictResolution, type CsvParseOptions, type CsvParseResult, DEFAULT_MAX_FILE_SIZE, type DeleteRequest, type DeleteResponse, DropZone, type DropZoneProps, type DropboxConfig, type DropboxFile, type FileCategory, FileList, type FileListProps, FileListSummary, FilePicker, type FilePickerProps, type GoogleDriveConfig, type GoogleDriveFile, type ImageDimensions, type ParsedUrl, type ParsedUrlItem, type PresignRequest, type PresignResponse, type SirvFile, SirvUploader, type SirvUploaderLabels, type SirvUploaderProps, SpreadsheetImport, type SpreadsheetImportProps, StagedFilesGrid, type StagedFilesGridProps, type UploadRequest, type UploadResponse, type UploadStatus, type UrlValidator, type UseDropboxChooserOptions, type UseFilePickerOptions, type UseFilePickerReturn, type UseGoogleDrivePickerOptions, type UseSirvUploadOptions$1 as UseSirvUploadOptions, type UseSirvUploadReturn$1 as UseSirvUploadReturn, canPreviewFile, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getFileCategory, getImageDimensions, getMimeType, is3DModelFile, isHeifFile, isImageFile, isPdfFile, isSpreadsheetFile, isSvgFile, isVideoFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useDropboxChooser, useGoogleDrivePicker, useSirvUpload, validateFileSize };

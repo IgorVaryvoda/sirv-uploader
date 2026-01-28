@@ -8,11 +8,11 @@ A React file upload widget for [Sirv CDN](https://sirv.com) with batch uploads, 
 - **Clipboard paste** - paste images directly from clipboard (Ctrl/Cmd+V)
 - **Staged uploads** - preview and edit files before uploading
 - **Batch uploads** with configurable concurrency
-- **CSV/Excel import** for bulk URL imports
-- **Dropbox integration** - import files from Dropbox
-- **Google Drive integration** - import files from Google Drive
+- **CSV/Excel import** - bulk URL imports with automatic staging
+- **Dropbox integration** - import and stage files from Dropbox
+- **Google Drive integration** - import and stage files from Google Drive
+- **Sirv file picker** - browse and stage existing Sirv files
 - **Multi-format support** - images, videos, 3D models, PDFs
-- **Sirv file picker** to browse existing files
 - **HEIC/HEIF conversion** for iPhone photos
 - **Dark mode** with automatic system preference detection
 - **Customizable styling** via CSS variables
@@ -105,6 +105,8 @@ In staged mode, files are shown in a grid with:
 - Edit and remove buttons
 - "Add more" button
 - Upload all button
+
+**External imports are automatically staged**: Files from Dropbox, Google Drive, Sirv picker, and URL imports are downloaded and staged in the grid for review before upload. This gives users a chance to review, edit, or remove files before uploading.
 
 ### Dropbox Integration
 

@@ -1,18 +1,49 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import clsx2 from 'clsx';
+import clsx6 from 'clsx';
 import { jsxs, jsx, Fragment } from 'react/jsx-runtime';
 
 // src/components/SirvUploader.tsx
 
 // src/utils/image-utils.ts
 var HEIC_TYPES = ["image/heic", "image/heif"];
-var IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif)$/i;
-var ACCEPTED_IMAGE_FORMATS = "image/jpeg,image/png,image/gif,image/webp,image/bmp,image/tiff,image/heic,image/heif,image/avif,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif";
+var IMAGE_EXTENSIONS = /\.(jpe?g|png|gif|webp|heic|heif|bmp|tiff?|avif|svg)$/i;
+var VIDEO_EXTENSIONS = /\.(mp4|webm|mov|avi|mkv|m4v|ogv)$/i;
+var MODEL_3D_EXTENSIONS = /\.(glb|gltf|obj|fbx|usdz|stl)$/i;
+var PDF_EXTENSION = /\.pdf$/i;
+var ACCEPTED_IMAGE_FORMATS = "image/jpeg,image/png,image/gif,image/webp,image/bmp,image/tiff,image/heic,image/heif,image/avif,image/svg+xml,.jpg,.jpeg,.png,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif,.avif,.svg";
+var ACCEPTED_VIDEO_FORMATS = "video/mp4,video/webm,video/quicktime,video/x-msvideo,video/x-matroska,.mp4,.webm,.mov,.avi,.mkv,.m4v,.ogv";
+var ACCEPTED_3D_FORMATS = "model/gltf-binary,model/gltf+json,.glb,.gltf,.obj,.fbx,.usdz,.stl";
+var ACCEPTED_ALL_FORMATS = `${ACCEPTED_IMAGE_FORMATS},${ACCEPTED_VIDEO_FORMATS},${ACCEPTED_3D_FORMATS},application/pdf,.pdf`;
 var DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024;
 function isImageFile(file) {
-  if (file.type.startsWith("image/")) return true;
-  if (IMAGE_EXTENSIONS.test(file.name)) return true;
+  if (file.type.startsWith("image/") && !file.type.includes("svg")) return true;
+  if (IMAGE_EXTENSIONS.test(file.name) && !file.name.toLowerCase().endsWith(".svg")) return true;
   return false;
+}
+function isSvgFile(file) {
+  return file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
+}
+function isVideoFile(file) {
+  if (file.type.startsWith("video/")) return true;
+  if (VIDEO_EXTENSIONS.test(file.name)) return true;
+  return false;
+}
+function is3DModelFile(file) {
+  const ext = file.name.toLowerCase().split(".").pop();
+  return MODEL_3D_EXTENSIONS.test(file.name) || ["glb", "gltf", "obj", "fbx", "usdz", "stl"].includes(ext || "");
+}
+function isPdfFile(file) {
+  return file.type === "application/pdf" || PDF_EXTENSION.test(file.name);
+}
+function canPreviewFile(file) {
+  return isImageFile(file) && !isSvgFile(file);
+}
+function getFileCategory(file) {
+  if (isImageFile(file) || isSvgFile(file)) return "image";
+  if (isVideoFile(file)) return "video";
+  if (is3DModelFile(file)) return "3d";
+  if (isPdfFile(file)) return "pdf";
+  return "other";
 }
 function isHeifFile(file) {
   if (HEIC_TYPES.includes(file.type.toLowerCase())) return true;
@@ -498,6 +529,8 @@ function DropZone({
   maxFileSize = 10 * 1024 * 1024,
   disabled = false,
   compact = false,
+  enablePaste = true,
+  acceptAllAssets = false,
   className,
   labels = {},
   children
@@ -506,6 +539,13 @@ function DropZone({
   const [isConverting, setIsConverting] = useState(false);
   const [convertingCount, setConvertingCount] = useState(0);
   const inputRef = useRef(null);
+  const containerRef = useRef(null);
+  const isAcceptableFile = useCallback((file) => {
+    if (acceptAllAssets) {
+      return isImageFile(file) || isVideoFile(file) || is3DModelFile(file) || isPdfFile(file);
+    }
+    return isImageFile(file);
+  }, [acceptAllAssets]);
   const processFiles = useCallback(
     async (fileList) => {
       const files = Array.from(fileList).slice(0, maxFiles);
@@ -514,8 +554,10 @@ function DropZone({
         onSpreadsheet(spreadsheetFile);
         return;
       }
-      const imageFiles = files.filter(isImageFile);
-      if (imageFiles.length === 0) return;
+      const acceptableFiles = files.filter(isAcceptableFile);
+      if (acceptableFiles.length === 0) return;
+      const imageFiles = acceptableFiles.filter((f) => isImageFile(f));
+      const otherFiles = acceptableFiles.filter((f) => !isImageFile(f));
       const heifFiles = imageFiles.filter(isHeifFile);
       const regularFiles = imageFiles.filter((f) => !isHeifFile(f));
       setIsConverting(heifFiles.length > 0);
@@ -587,14 +629,73 @@ function DropZone({
         }
         setConvertingCount((c) => c - 1);
       }
+      for (const file of otherFiles) {
+        const sizeValidation = validateFileSize(file, maxFileSize);
+        if (!sizeValidation.valid) {
+          processedFiles.push({
+            id: generateId(),
+            file,
+            filename: file.name,
+            previewUrl: "",
+            fileCategory: getFileCategory(file),
+            status: "error",
+            progress: 0,
+            error: sizeValidation.error
+          });
+          continue;
+        }
+        processedFiles.push({
+          id: generateId(),
+          file,
+          filename: file.name,
+          previewUrl: "",
+          // No preview for non-image files
+          fileCategory: getFileCategory(file),
+          size: file.size,
+          status: "pending",
+          progress: 0
+        });
+      }
       setIsConverting(false);
       setConvertingCount(0);
       if (processedFiles.length > 0) {
         onFiles(processedFiles);
       }
     },
-    [maxFiles, maxFileSize, onFiles, onSpreadsheet]
+    [maxFiles, maxFileSize, onFiles, onSpreadsheet, isAcceptableFile]
   );
+  useEffect(() => {
+    if (!enablePaste || disabled) return;
+    const handlePaste = async (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file) {
+            if (item.type.startsWith("image/") && !file.name.includes(".")) {
+              const timestamp = Date.now();
+              const ext = item.type.split("/")[1] || "png";
+              const namedFile = new File([file], `pasted-image-${timestamp}.${ext}`, {
+                type: file.type
+              });
+              files.push(namedFile);
+            } else {
+              files.push(file);
+            }
+          }
+        }
+      }
+      if (files.length > 0) {
+        e.preventDefault();
+        await processFiles(files);
+      }
+    };
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  }, [enablePaste, disabled, processFiles]);
   const handleDragOver = useCallback(
     (e) => {
       e.preventDefault();
@@ -647,16 +748,18 @@ function DropZone({
     },
     [disabled]
   );
-  const acceptString = accept.join(",") || ACCEPTED_IMAGE_FORMATS;
+  const acceptString = acceptAllAssets ? ACCEPTED_ALL_FORMATS : accept.join(",") || ACCEPTED_IMAGE_FORMATS;
   return /* @__PURE__ */ jsxs(
     "div",
     {
-      className: clsx2(
+      ref: containerRef,
+      className: clsx6(
         "sirv-dropzone",
         isDragOver && "sirv-dropzone--drag-over",
         disabled && "sirv-dropzone--disabled",
         compact && "sirv-dropzone--compact",
         isConverting && "sirv-dropzone--converting",
+        enablePaste && "sirv-dropzone--paste-enabled",
         className
       ),
       onDragOver: handleDragOver,
@@ -710,7 +813,10 @@ function DropZone({
             }
           ),
           /* @__PURE__ */ jsx("p", { className: "sirv-dropzone__text", children: labels.dropzone || "Drop files here or click to browse" }),
-          !compact && /* @__PURE__ */ jsx("p", { className: "sirv-dropzone__hint", children: labels.dropzoneHint || "Supports JPG, PNG, WebP, GIF, HEIC up to 10MB" })
+          !compact && /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx("p", { className: "sirv-dropzone__hint", children: labels.dropzoneHint || (acceptAllAssets ? "Supports images, videos, 3D models, and PDFs" : "Supports JPG, PNG, WebP, GIF, HEIC up to 10MB") }),
+            enablePaste && /* @__PURE__ */ jsx("p", { className: "sirv-dropzone__paste-hint", children: labels.pasteHint || "You can also paste images from clipboard" })
+          ] })
         ] }) })
       ]
     }
@@ -725,7 +831,7 @@ function FileList({
   labels = {}
 }) {
   if (files.length === 0) return null;
-  return /* @__PURE__ */ jsx("div", { className: clsx2("sirv-filelist", className), children: files.map((file) => /* @__PURE__ */ jsx(
+  return /* @__PURE__ */ jsx("div", { className: clsx6("sirv-filelist", className), children: files.map((file) => /* @__PURE__ */ jsx(
     FileItem,
     {
       file,
@@ -749,7 +855,7 @@ function FileItem({ file, onRemove, onRetry, showThumbnail, labels = {} }) {
   return /* @__PURE__ */ jsxs(
     "div",
     {
-      className: clsx2(
+      className: clsx6(
         "sirv-filelist__item",
         `sirv-filelist__item--${file.status}`,
         file.error && "sirv-filelist__item--has-error"
@@ -817,7 +923,7 @@ function FileListSummary({ files, className }) {
   const success = files.filter((f) => f.status === "success").length;
   const error = files.filter((f) => f.status === "error").length;
   if (files.length === 0) return null;
-  return /* @__PURE__ */ jsxs("div", { className: clsx2("sirv-filelist-summary", className), children: [
+  return /* @__PURE__ */ jsxs("div", { className: clsx6("sirv-filelist-summary", className), children: [
     /* @__PURE__ */ jsxs("span", { className: "sirv-filelist-summary__total", children: [
       files.length,
       " files"
@@ -839,6 +945,151 @@ function FileListSummary({ files, className }) {
       " failed"
     ] })
   ] });
+}
+var VideoIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" }) });
+var Model3DIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" }) });
+var PdfIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" }) });
+var FileIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" }) });
+var EditIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__action-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" }) });
+var RemoveIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__action-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M6 18L18 6M6 6l12 12" }) });
+var PlusIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__add-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M12 4.5v15m7.5-7.5h-15" }) });
+function getPlaceholderIcon(category) {
+  switch (category) {
+    case "video":
+      return /* @__PURE__ */ jsx(VideoIcon, {});
+    case "3d":
+      return /* @__PURE__ */ jsx(Model3DIcon, {});
+    case "pdf":
+      return /* @__PURE__ */ jsx(PdfIcon, {});
+    default:
+      return /* @__PURE__ */ jsx(FileIcon, {});
+  }
+}
+function StagedFilesGrid({
+  files,
+  onRemove,
+  onEdit,
+  onAddMore,
+  maxFiles = 50,
+  accept,
+  disabled = false,
+  showFilenames = true,
+  className,
+  labels = {}
+}) {
+  const inputRef = useRef(null);
+  const handleAddMoreClick = useCallback(() => {
+    if (!disabled) {
+      inputRef.current?.click();
+    }
+  }, [disabled]);
+  const handleFileChange = useCallback(
+    (e) => {
+      if (!onAddMore || !e.target.files) return;
+      const newFiles = Array.from(e.target.files).map((file) => ({
+        id: generateId(),
+        file,
+        filename: file.name,
+        previewUrl: canPreviewFile(file) ? URL.createObjectURL(file) : "",
+        size: file.size,
+        status: "pending",
+        progress: 0
+      }));
+      onAddMore(newFiles);
+      e.target.value = "";
+    },
+    [onAddMore]
+  );
+  const canAddMore = files.length < maxFiles && onAddMore;
+  return /* @__PURE__ */ jsx("div", { className: clsx6("sirv-staged-grid", className), children: /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__items", children: [
+    files.map((file) => {
+      const hasPreview = !!file.previewUrl;
+      const canEditFile = onEdit && file.file && hasPreview;
+      return /* @__PURE__ */ jsxs(
+        "div",
+        {
+          className: clsx6(
+            "sirv-staged-grid__item",
+            file.status === "error" && "sirv-staged-grid__item--error",
+            file.status === "uploading" && "sirv-staged-grid__item--uploading",
+            file.status === "success" && "sirv-staged-grid__item--success"
+          ),
+          children: [
+            /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__preview", children: [
+              hasPreview ? /* @__PURE__ */ jsx(
+                "img",
+                {
+                  src: file.previewUrl,
+                  alt: file.filename,
+                  className: "sirv-staged-grid__image"
+                }
+              ) : /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__placeholder", children: getPlaceholderIcon(file.fileCategory) }),
+              !disabled && /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__overlay", children: [
+                canEditFile && /* @__PURE__ */ jsx(
+                  "button",
+                  {
+                    type: "button",
+                    className: "sirv-staged-grid__action sirv-staged-grid__action--edit",
+                    onClick: () => onEdit(file),
+                    title: labels.edit || "Edit",
+                    children: /* @__PURE__ */ jsx(EditIcon, {})
+                  }
+                ),
+                /* @__PURE__ */ jsx(
+                  "button",
+                  {
+                    type: "button",
+                    className: "sirv-staged-grid__action sirv-staged-grid__action--remove",
+                    onClick: () => onRemove(file.id),
+                    title: labels.remove || "Remove",
+                    children: /* @__PURE__ */ jsx(RemoveIcon, {})
+                  }
+                )
+              ] }),
+              file.status === "uploading" && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__progress", children: /* @__PURE__ */ jsx(
+                "div",
+                {
+                  className: "sirv-staged-grid__progress-bar",
+                  style: { width: `${file.progress}%` }
+                }
+              ) }),
+              file.status === "success" && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__success-badge", children: /* @__PURE__ */ jsx("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx("polyline", { points: "20 6 9 17 4 12" }) }) })
+            ] }),
+            showFilenames && /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__info", children: [
+              /* @__PURE__ */ jsx("span", { className: "sirv-staged-grid__filename", title: file.filename, children: file.filename }),
+              file.size && /* @__PURE__ */ jsx("span", { className: "sirv-staged-grid__size", children: formatFileSize(file.size) })
+            ] }),
+            file.error && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__error", title: file.error, children: file.error })
+          ]
+        },
+        file.id
+      );
+    }),
+    canAddMore && /* @__PURE__ */ jsxs(
+      "button",
+      {
+        type: "button",
+        className: "sirv-staged-grid__add-tile",
+        onClick: handleAddMoreClick,
+        disabled,
+        children: [
+          /* @__PURE__ */ jsx(PlusIcon, {}),
+          /* @__PURE__ */ jsx("span", { children: labels.addMore || "Add more" }),
+          /* @__PURE__ */ jsx(
+            "input",
+            {
+              ref: inputRef,
+              type: "file",
+              accept,
+              multiple: true,
+              onChange: handleFileChange,
+              className: "sirv-staged-grid__input"
+            }
+          )
+        ]
+      }
+    )
+  ] }) });
 }
 function FilePicker({
   endpoint,
@@ -953,7 +1204,7 @@ function FilePicker({
   return /* @__PURE__ */ jsx(
     "div",
     {
-      className: clsx2("sirv-filepicker-overlay", className),
+      className: clsx6("sirv-filepicker-overlay", className),
       onClick: onClose,
       onKeyDown: handleKeyDown,
       role: "dialog",
@@ -1036,7 +1287,7 @@ function FilePicker({
               "button",
               {
                 type: "button",
-                className: clsx2(
+                className: clsx6(
                   "sirv-filepicker__item",
                   `sirv-filepicker__item--${item.type}`,
                   isSelected && "sirv-filepicker__item--selected"
@@ -1166,11 +1417,11 @@ function SpreadsheetImport({
     setSelectedColumn("");
     setError(null);
   }, []);
-  return /* @__PURE__ */ jsx("div", { className: clsx2("sirv-spreadsheet", className), children: !result ? /* @__PURE__ */ jsxs(Fragment, { children: [
+  return /* @__PURE__ */ jsx("div", { className: clsx6("sirv-spreadsheet", className), children: !result ? /* @__PURE__ */ jsxs(Fragment, { children: [
     /* @__PURE__ */ jsxs(
       "div",
       {
-        className: clsx2(
+        className: clsx6(
           "sirv-spreadsheet__drop",
           isDragOver && "sirv-spreadsheet__drop--active"
         ),
@@ -1294,7 +1545,7 @@ function SpreadsheetImport({
           className: "sirv-btn sirv-btn--primary",
           onClick: handleImport,
           disabled: !selectedColumn || isLoading,
-          children: isLoading ? "Importing..." : labels.import || "Import URLs"
+          children: isLoading ? "Adding images..." : `Add ${result.estimatedImageCounts[result.headers.indexOf(selectedColumn)] || 0} images`
         }
       )
     ] })
@@ -1518,26 +1769,334 @@ function useSirvUpload(options) {
     isComplete
   };
 }
+var DEFAULT_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".gif",
+  ".webp",
+  ".heic",
+  ".heif",
+  ".avif",
+  ".bmp",
+  ".tiff",
+  ".tif",
+  ".mp4",
+  ".webm",
+  ".mov",
+  ".avi",
+  ".glb",
+  ".gltf",
+  ".obj",
+  ".fbx",
+  ".pdf"
+];
+function useDropboxChooser({
+  appKey,
+  onSelect,
+  onCancel,
+  multiselect = true,
+  extensions = DEFAULT_EXTENSIONS,
+  maxSizeBytes
+}) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSupported, setIsSupported] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  useEffect(() => {
+    if (!appKey) return;
+    const checkSupport = () => {
+      if (window.Dropbox) {
+        setIsSupported(window.Dropbox.isBrowserSupported());
+        setIsReady(true);
+      }
+    };
+    if (window.Dropbox) {
+      requestAnimationFrame(checkSupport);
+      return;
+    }
+    const existingScript = document.getElementById("dropboxjs");
+    if (existingScript) {
+      checkSupport();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://www.dropbox.com/static/api/2/dropins.js";
+    script.id = "dropboxjs";
+    script.setAttribute("data-app-key", appKey);
+    script.async = true;
+    script.onload = checkSupport;
+    document.body.appendChild(script);
+    return () => {
+    };
+  }, [appKey]);
+  const openChooser = useCallback(() => {
+    if (!window.Dropbox || !isSupported) {
+      console.warn("Dropbox Chooser not available");
+      return;
+    }
+    setIsLoading(true);
+    window.Dropbox.choose({
+      success: (files) => {
+        setIsLoading(false);
+        onSelect(files);
+      },
+      cancel: () => {
+        setIsLoading(false);
+        onCancel?.();
+      },
+      linkType: "direct",
+      multiselect,
+      extensions,
+      sizeLimit: maxSizeBytes
+    });
+  }, [isSupported, onSelect, onCancel, multiselect, extensions, maxSizeBytes]);
+  return {
+    /** Open the Dropbox file chooser */
+    openChooser,
+    /** Loading state */
+    isLoading,
+    /** Whether Dropbox is supported in this browser */
+    isSupported,
+    /** Whether the picker is configured and ready to use */
+    isConfigured: !!appKey,
+    /** Whether the SDK has finished loading */
+    isReady
+  };
+}
+var SCOPE = "https://www.googleapis.com/auth/drive.file";
+var STORAGE_KEY = "sirv_gdrive_picker_token";
+var TOKEN_EXPIRY_KEY = "sirv_gdrive_picker_token_expiry";
+var DEFAULT_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "image/svg+xml",
+  "image/bmp",
+  "image/tiff",
+  "image/heic",
+  "image/heif",
+  "image/avif",
+  "video/mp4",
+  "video/webm",
+  "video/quicktime",
+  "video/x-msvideo",
+  "video/mpeg",
+  "application/pdf"
+].join(",");
+function getStoredToken() {
+  if (typeof window === "undefined") return null;
+  try {
+    const token = localStorage.getItem(STORAGE_KEY);
+    const expiry = localStorage.getItem(TOKEN_EXPIRY_KEY);
+    if (token && expiry) {
+      const expiryTime = parseInt(expiry, 10);
+      if (Date.now() < expiryTime - 6e4) {
+        return token;
+      }
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(TOKEN_EXPIRY_KEY);
+    }
+  } catch {
+  }
+  return null;
+}
+function storeToken(token, expiresIn = 3600) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(STORAGE_KEY, token);
+    localStorage.setItem(TOKEN_EXPIRY_KEY, String(Date.now() + expiresIn * 1e3));
+  } catch {
+  }
+}
+function clearStoredToken() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  } catch {
+  }
+}
+function useGoogleDrivePicker({
+  clientId,
+  apiKey,
+  appId,
+  onSelect,
+  onCancel,
+  multiselect = true,
+  mimeTypes = DEFAULT_MIME_TYPES
+}) {
+  const [isLoading, setIsLoading] = useState(false);
+  const [isReady, setIsReady] = useState(false);
+  const [hasSession, setHasSession] = useState(false);
+  const accessTokenRef = useRef(null);
+  const pickerInitedRef = useRef(false);
+  const isConfigured = !!(clientId && apiKey && appId);
+  useEffect(() => {
+    const storedToken = getStoredToken();
+    if (storedToken) {
+      accessTokenRef.current = storedToken;
+      setHasSession(true);
+    }
+  }, []);
+  const clearSession = useCallback(() => {
+    clearStoredToken();
+    accessTokenRef.current = null;
+    setHasSession(false);
+  }, []);
+  const loadGoogleScripts = useCallback(async () => {
+    if (!document.getElementById("google-gsi-script")) {
+      const gsiScript = document.createElement("script");
+      gsiScript.id = "google-gsi-script";
+      gsiScript.src = "https://accounts.google.com/gsi/client";
+      gsiScript.async = true;
+      gsiScript.defer = true;
+      document.body.appendChild(gsiScript);
+      await new Promise((resolve) => {
+        gsiScript.onload = () => resolve();
+      });
+    }
+    if (!document.getElementById("google-picker-script")) {
+      const pickerScript = document.createElement("script");
+      pickerScript.id = "google-picker-script";
+      pickerScript.src = "https://apis.google.com/js/api.js";
+      pickerScript.async = true;
+      pickerScript.defer = true;
+      document.body.appendChild(pickerScript);
+      await new Promise((resolve) => {
+        pickerScript.onload = () => resolve();
+      });
+    }
+    if (window.gapi && !pickerInitedRef.current) {
+      await new Promise((resolve) => {
+        window.gapi.load("picker", () => {
+          pickerInitedRef.current = true;
+          resolve();
+        });
+      });
+    }
+    setIsReady(true);
+  }, []);
+  const getAccessToken = useCallback(async () => {
+    if (accessTokenRef.current) {
+      return accessTokenRef.current;
+    }
+    return new Promise((resolve) => {
+      const tokenClient = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: SCOPE,
+        callback: (response) => {
+          if (response.access_token) {
+            const token = response.access_token;
+            const expiresIn = response.expires_in || 3600;
+            accessTokenRef.current = token;
+            storeToken(token, expiresIn);
+            setHasSession(true);
+            resolve(token);
+          } else {
+            console.error("Google OAuth error:", response.error);
+            resolve(null);
+          }
+        }
+      });
+      tokenClient.requestAccessToken();
+    });
+  }, [clientId]);
+  const showPicker = useCallback(
+    (accessToken) => {
+      if (!window.google?.picker) {
+        console.error("Google Picker API not loaded");
+        return;
+      }
+      const view = new window.google.picker.DocsView(window.google.picker.ViewId.DOCS);
+      view.setMimeTypes(mimeTypes);
+      const picker = new window.google.picker.PickerBuilder().addView(view).setOAuthToken(accessToken).setDeveloperKey(apiKey).setAppId(appId).setOrigin(window.location.origin).setCallback((data) => {
+        if (data.action === window.google.picker.Action.PICKED) {
+          setIsLoading(false);
+          if (data.docs && accessTokenRef.current) {
+            onSelect(data.docs, accessTokenRef.current);
+          }
+        } else if (data.action === window.google.picker.Action.CANCEL) {
+          setIsLoading(false);
+          onCancel?.();
+        }
+      });
+      if (multiselect && window.google.picker.Feature?.MULTISELECT_ENABLED) {
+        picker.enableFeature(window.google.picker.Feature.MULTISELECT_ENABLED);
+      } else if (multiselect) {
+        picker.enableFeature(1);
+      }
+      const pickerInstance = picker.build();
+      pickerInstance.setVisible(true);
+    },
+    [apiKey, appId, mimeTypes, multiselect, onSelect, onCancel]
+  );
+  const openPicker = useCallback(async () => {
+    if (!isConfigured) {
+      console.warn("Google Drive Picker not configured");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      await loadGoogleScripts();
+      const accessToken = await getAccessToken();
+      if (accessToken) {
+        showPicker(accessToken);
+      } else {
+        setIsLoading(false);
+      }
+    } catch (err) {
+      console.error("Failed to open Google Drive Picker:", err);
+      setIsLoading(false);
+    }
+  }, [isConfigured, loadGoogleScripts, getAccessToken, showPicker]);
+  return {
+    /** Open the Google Drive picker */
+    openPicker,
+    /** Loading state */
+    isLoading,
+    /** Whether all APIs are loaded and ready */
+    isReady,
+    /** Whether the picker is configured */
+    isConfigured,
+    /** Whether we have a stored session */
+    hasSession,
+    /** Clear stored session to force re-authentication */
+    clearSession
+  };
+}
 var DEFAULT_LABELS = {
   dropzone: "Drop files here or click to browse",
   dropzoneHint: "Supports JPG, PNG, WebP, GIF, HEIC up to 10MB",
+  pasteHint: "You can also paste images from clipboard",
   browse: "Browse",
   uploadFiles: "Upload Files",
   importUrls: "Import URLs",
   selectFromSirv: "Select from Sirv",
+  importFromDropbox: "Dropbox",
+  importFromGoogleDrive: "Google Drive",
   uploading: "Uploading...",
   processing: "Processing...",
   success: "Uploaded",
   error: "Failed",
   retry: "Retry",
   remove: "Remove",
+  edit: "Edit",
+  addMore: "Add more",
+  clearAll: "Clear all",
+  upload: "Upload",
   cancel: "Cancel",
   overwrite: "Overwrite",
   rename: "Rename",
   skip: "Skip",
   conflictTitle: "File exists",
-  conflictMessage: "A file with this name already exists."
+  conflictMessage: "A file with this name already exists.",
+  filesSelected: "files selected"
 };
+var UploadIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" }) });
+var UrlIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" }) });
+var DropboxIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsx("path", { d: "M6 2l6 3.75L6 9.5 0 5.75 6 2zm12 0l6 3.75-6 3.75-6-3.75L18 2zM0 13.25L6 9.5l6 3.75L6 17 0 13.25zm18-3.75l6 3.75L18 17l-6-3.75 6-3.75zM6 18.25l6-3.75 6 3.75L12 22l-6-3.75z" }) });
+var GoogleDriveIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsx("path", { d: "M7.71 3.5L1.15 15l3.43 5.93h13.68l3.44-5.93L15.14 3.5H7.71zm.79 1.5h5.95l5.14 9H8.08l-5.14-9h5.56z" }) });
 function SirvUploader({
   presignEndpoint,
   proxyEndpoint,
@@ -1548,6 +2107,8 @@ function SirvUploader({
   onSelect,
   onRemove,
   features = {},
+  dropbox,
+  googleDrive,
   maxFiles = 50,
   maxFileSize = 10 * 1024 * 1024,
   accept = ["image/*"],
@@ -1566,10 +2127,16 @@ function SirvUploader({
     batch = true,
     csvImport = true,
     filePicker = true,
-    dragDrop = true
+    dragDrop = true,
+    paste = true,
+    allAssets = false
   } = features;
   const [activeTab, setActiveTab] = useState("upload");
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0, source: "" });
+  const showStagedMode = !autoUpload && stagedFiles.length > 0;
   if (!presignEndpoint && !proxyEndpoint) {
     console.warn("SirvUploader: Either presignEndpoint or proxyEndpoint must be provided");
   }
@@ -1585,78 +2152,243 @@ function SirvUploader({
   });
   const handleFiles = useCallback(
     (files) => {
-      upload.addFiles(files);
-      onSelect?.(files);
+      if (autoUpload) {
+        upload.addFiles(files);
+        onSelect?.(files);
+      } else {
+        setStagedFiles((prev) => {
+          const newFiles = files.filter(
+            (f) => !prev.some((p) => p.id === f.id)
+          );
+          return [...prev, ...newFiles].slice(0, maxFiles);
+        });
+        onSelect?.(files);
+      }
     },
-    [upload, onSelect]
+    [upload, onSelect, autoUpload, maxFiles]
   );
   const handleSpreadsheet = useCallback(() => {
     setActiveTab("urls");
   }, []);
+  const downloadAndStageFile = useCallback(async (url, filename, accessToken) => {
+    try {
+      const headers = {};
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+      const response = await fetch(url, { headers });
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const file = new File([blob], filename, { type: blob.type || "image/png" });
+      return {
+        id: generateId(),
+        file,
+        filename,
+        previewUrl: URL.createObjectURL(blob),
+        size: blob.size,
+        status: "pending",
+        progress: 0
+      };
+    } catch (err) {
+      console.error(`Failed to download ${filename}:`, err);
+      return null;
+    }
+  }, []);
   const handleUrls = useCallback(
-    (urls) => {
-      upload.addUrls(urls);
+    async (urls) => {
+      const validUrls = urls.slice(0, maxFiles);
+      if (validUrls.length === 0) return;
+      setIsImporting(true);
+      setImportProgress({ current: 0, total: validUrls.length, source: "URLs" });
+      const newFiles = [];
+      for (let i = 0; i < validUrls.length; i++) {
+        const url = validUrls[i];
+        setImportProgress({ current: i + 1, total: validUrls.length, source: "URLs" });
+        const filename = url.split("/").pop()?.split("?")[0] || `image-${i + 1}.png`;
+        const staged = await downloadAndStageFile(url, filename);
+        if (staged) newFiles.push(staged);
+      }
+      setIsImporting(false);
+      setImportProgress({ current: 0, total: 0, source: "" });
+      if (newFiles.length > 0) {
+        handleFiles(newFiles);
+        setActiveTab("upload");
+      }
     },
-    [upload]
+    [maxFiles, downloadAndStageFile, handleFiles]
   );
   const handlePickerSelect = useCallback(
-    (items) => {
-      const files = items.map((item) => ({
-        id: generateId(),
-        filename: item.name,
-        previewUrl: item.thumbnail || "",
-        sirvUrl: `https://${sirvAccount}.sirv.com${item.path}`,
-        sirvPath: item.path,
-        size: item.size,
-        status: "success",
-        progress: 100
-      }));
-      upload.addFiles(files);
-      onSelect?.(files);
+    async (items) => {
+      setIsPickerOpen(false);
+      setIsImporting(true);
+      setImportProgress({ current: 0, total: items.length, source: "Sirv" });
+      const newFiles = [];
+      for (let i = 0; i < items.slice(0, maxFiles).length; i++) {
+        const item = items[i];
+        setImportProgress({ current: i + 1, total: items.length, source: "Sirv" });
+        const url = `https://${sirvAccount}.sirv.com${item.path}`;
+        const staged = await downloadAndStageFile(url, item.name);
+        if (staged) newFiles.push(staged);
+      }
+      setIsImporting(false);
+      setImportProgress({ current: 0, total: 0, source: "" });
+      if (newFiles.length > 0) {
+        handleFiles(newFiles);
+      }
     },
-    [sirvAccount, upload, onSelect]
+    [sirvAccount, maxFiles, downloadAndStageFile, handleFiles]
   );
   const handleRemove = useCallback(
     (id) => {
-      const file = upload.files.find((f) => f.id === id);
-      upload.removeFile(id);
-      if (file) onRemove?.(file);
+      if (showStagedMode) {
+        setStagedFiles((prev) => prev.filter((f) => f.id !== id));
+      } else {
+        const file = upload.files.find((f) => f.id === id);
+        upload.removeFile(id);
+        if (file) onRemove?.(file);
+      }
     },
-    [upload, onRemove]
+    [upload, onRemove, showStagedMode]
+  );
+  const handleEdit = useCallback((file) => {
+    console.log("Edit file:", file.filename);
+  }, []);
+  const handleAddMore = useCallback(
+    (files) => {
+      setStagedFiles((prev) => [...prev, ...files].slice(0, maxFiles));
+    },
+    [maxFiles]
   );
   const handleUploadAll = useCallback(() => {
-    upload.uploadAll();
-  }, [upload]);
+    upload.addFiles(stagedFiles);
+    setStagedFiles([]);
+  }, [upload, stagedFiles]);
   const handleClearAll = useCallback(() => {
-    upload.clearFiles();
-  }, [upload]);
-  const hasFiles = upload.files.length > 0;
-  const hasPendingFiles = upload.files.some((f) => f.status === "pending" || f.status === "error");
-  const showTabs = csvImport && batch;
+    if (showStagedMode) {
+      setStagedFiles([]);
+    } else {
+      upload.clearFiles();
+    }
+  }, [upload, showStagedMode]);
+  const dropboxChooser = useDropboxChooser({
+    appKey: dropbox?.appKey || "",
+    onSelect: async (files) => {
+      setIsImporting(true);
+      setImportProgress({ current: 0, total: files.length, source: "Dropbox" });
+      const newFiles = [];
+      for (let i = 0; i < files.slice(0, maxFiles).length; i++) {
+        const f = files[i];
+        setImportProgress({ current: i + 1, total: files.length, source: "Dropbox" });
+        const staged = await downloadAndStageFile(f.link, f.name);
+        if (staged) newFiles.push(staged);
+      }
+      setIsImporting(false);
+      setImportProgress({ current: 0, total: 0, source: "" });
+      if (newFiles.length > 0) {
+        handleFiles(newFiles);
+        setActiveTab("upload");
+      }
+    }
+  });
+  const googleDrivePicker = useGoogleDrivePicker({
+    clientId: googleDrive?.clientId || "",
+    apiKey: googleDrive?.apiKey || "",
+    appId: googleDrive?.appId || "",
+    onSelect: async (files, accessToken) => {
+      setIsImporting(true);
+      setImportProgress({ current: 0, total: files.length, source: "Google Drive" });
+      const newFiles = [];
+      for (let i = 0; i < files.slice(0, maxFiles).length; i++) {
+        const f = files[i];
+        setImportProgress({ current: i + 1, total: files.length, source: "Google Drive" });
+        const downloadUrl = `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`;
+        const staged = await downloadAndStageFile(downloadUrl, f.name, accessToken);
+        if (staged) newFiles.push(staged);
+      }
+      setIsImporting(false);
+      setImportProgress({ current: 0, total: 0, source: "" });
+      if (newFiles.length > 0) {
+        handleFiles(newFiles);
+        setActiveTab("upload");
+      }
+    }
+  });
+  const hasDropbox = !!dropbox?.appKey && dropboxChooser.isConfigured;
+  const hasGoogleDrive = !!googleDrive && googleDrivePicker.isConfigured;
+  const hasFiles = showStagedMode ? stagedFiles.length > 0 : upload.files.length > 0;
+  const hasPendingFiles = showStagedMode ? stagedFiles.some((f) => f.status === "pending" || f.status === "error") : upload.files.some((f) => f.status === "pending" || f.status === "error");
+  const showTabs = csvImport || hasDropbox || hasGoogleDrive;
   const browseEndpoint = proxyEndpoint || (presignEndpoint ? presignEndpoint.replace(/\/presign$/, "") : "");
   const themeClass = theme === "dark" ? "sirv-uploader--dark" : theme === "light" ? "sirv-uploader--light" : void 0;
-  return /* @__PURE__ */ jsxs("div", { className: clsx2("sirv-uploader", themeClass, className), children: [
+  const acceptString = allAssets ? ACCEPTED_ALL_FORMATS : accept.join(",");
+  return /* @__PURE__ */ jsxs("div", { className: clsx6("sirv-uploader", themeClass, className), children: [
     showTabs && /* @__PURE__ */ jsxs("div", { className: "sirv-tabs", children: [
-      /* @__PURE__ */ jsx(
+      /* @__PURE__ */ jsxs(
         "button",
         {
           type: "button",
-          className: clsx2("sirv-tabs__tab", activeTab === "upload" && "sirv-tabs__tab--active"),
+          className: clsx6("sirv-tabs__tab", activeTab === "upload" && "sirv-tabs__tab--active"),
           onClick: () => setActiveTab("upload"),
-          children: labels.uploadFiles
+          children: [
+            /* @__PURE__ */ jsx(UploadIcon, {}),
+            labels.uploadFiles
+          ]
         }
       ),
-      /* @__PURE__ */ jsx(
+      csvImport && /* @__PURE__ */ jsxs(
         "button",
         {
           type: "button",
-          className: clsx2("sirv-tabs__tab", activeTab === "urls" && "sirv-tabs__tab--active"),
+          className: clsx6("sirv-tabs__tab", activeTab === "urls" && "sirv-tabs__tab--active"),
           onClick: () => setActiveTab("urls"),
-          children: labels.importUrls
+          children: [
+            /* @__PURE__ */ jsx(UrlIcon, {}),
+            labels.importUrls
+          ]
+        }
+      ),
+      hasDropbox && /* @__PURE__ */ jsxs(
+        "button",
+        {
+          type: "button",
+          className: clsx6("sirv-tabs__tab", activeTab === "dropbox" && "sirv-tabs__tab--active"),
+          onClick: () => setActiveTab("dropbox"),
+          children: [
+            /* @__PURE__ */ jsx(DropboxIcon, {}),
+            labels.importFromDropbox
+          ]
+        }
+      ),
+      hasGoogleDrive && /* @__PURE__ */ jsxs(
+        "button",
+        {
+          type: "button",
+          className: clsx6("sirv-tabs__tab", activeTab === "gdrive" && "sirv-tabs__tab--active"),
+          onClick: () => setActiveTab("gdrive"),
+          children: [
+            /* @__PURE__ */ jsx(GoogleDriveIcon, {}),
+            labels.importFromGoogleDrive
+          ]
         }
       )
     ] }),
-    activeTab === "upload" && /* @__PURE__ */ jsxs(Fragment, { children: [
+    activeTab === "upload" && /* @__PURE__ */ jsx(Fragment, { children: showStagedMode ? /* @__PURE__ */ jsx(
+      StagedFilesGrid,
+      {
+        files: stagedFiles,
+        onRemove: handleRemove,
+        onEdit: handleEdit,
+        onAddMore: handleAddMore,
+        maxFiles,
+        accept: acceptString,
+        disabled,
+        labels: {
+          addMore: labels.addMore,
+          edit: labels.edit,
+          remove: labels.remove
+        }
+      }
+    ) : /* @__PURE__ */ jsxs(Fragment, { children: [
       dragDrop && /* @__PURE__ */ jsx(
         DropZone,
         {
@@ -1667,15 +2399,18 @@ function SirvUploader({
           maxFileSize,
           disabled,
           compact,
+          enablePaste: paste,
+          acceptAllAssets: allAssets,
           labels: {
             dropzone: labels.dropzone,
             dropzoneHint: labels.dropzoneHint,
-            browse: labels.browse
+            browse: labels.browse,
+            pasteHint: labels.pasteHint
           },
           children
         }
       ),
-      hasFiles && /* @__PURE__ */ jsx(
+      hasFiles && autoUpload && /* @__PURE__ */ jsx(
         FileList,
         {
           files: upload.files,
@@ -1691,9 +2426,52 @@ function SirvUploader({
           }
         }
       )
-    ] }),
+    ] }) }),
     activeTab === "urls" && csvImport && /* @__PURE__ */ jsx(SpreadsheetImport, { onUrls: handleUrls }),
-    (hasFiles || filePicker) && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__toolbar", children: [
+    isImporting && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__import-progress", children: [
+      /* @__PURE__ */ jsx("div", { className: "sirv-uploader__import-spinner" }),
+      /* @__PURE__ */ jsxs("p", { className: "sirv-uploader__import-text", children: [
+        "Importing from ",
+        importProgress.source,
+        "..."
+      ] }),
+      /* @__PURE__ */ jsxs("p", { className: "sirv-uploader__import-count", children: [
+        importProgress.current,
+        " / ",
+        importProgress.total
+      ] })
+    ] }),
+    activeTab === "dropbox" && hasDropbox && !isImporting && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__external-picker", children: [
+      /* @__PURE__ */ jsx("div", { className: "sirv-uploader__external-icon sirv-uploader__external-icon--dropbox", children: /* @__PURE__ */ jsx(DropboxIcon, {}) }),
+      /* @__PURE__ */ jsx("h3", { className: "sirv-uploader__external-title", children: "Import from Dropbox" }),
+      /* @__PURE__ */ jsx("p", { className: "sirv-uploader__external-description", children: "Select files from your Dropbox account" }),
+      /* @__PURE__ */ jsx(
+        "button",
+        {
+          type: "button",
+          className: "sirv-btn sirv-btn--primary sirv-btn--dropbox",
+          onClick: dropboxChooser.openChooser,
+          disabled: disabled || dropboxChooser.isLoading,
+          children: dropboxChooser.isLoading ? labels.uploading : "Open Dropbox"
+        }
+      )
+    ] }),
+    activeTab === "gdrive" && hasGoogleDrive && !isImporting && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__external-picker", children: [
+      /* @__PURE__ */ jsx("div", { className: "sirv-uploader__external-icon sirv-uploader__external-icon--gdrive", children: /* @__PURE__ */ jsx(GoogleDriveIcon, {}) }),
+      /* @__PURE__ */ jsx("h3", { className: "sirv-uploader__external-title", children: "Import from Google Drive" }),
+      /* @__PURE__ */ jsx("p", { className: "sirv-uploader__external-description", children: "Select files from your Google Drive" }),
+      /* @__PURE__ */ jsx(
+        "button",
+        {
+          type: "button",
+          className: "sirv-btn sirv-btn--primary sirv-btn--gdrive",
+          onClick: googleDrivePicker.openPicker,
+          disabled: disabled || googleDrivePicker.isLoading,
+          children: googleDrivePicker.isLoading ? labels.uploading : "Open Google Drive"
+        }
+      )
+    ] }),
+    (hasFiles || filePicker) && activeTab === "upload" && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__toolbar", children: [
       /* @__PURE__ */ jsx("div", { className: "sirv-uploader__toolbar-left", children: filePicker && browseEndpoint && /* @__PURE__ */ jsxs(
         "button",
         {
@@ -1708,29 +2486,49 @@ function SirvUploader({
         }
       ) }),
       /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__toolbar-right", children: [
-        hasFiles && /* @__PURE__ */ jsx(
-          "button",
-          {
-            type: "button",
-            className: "sirv-btn",
-            onClick: handleClearAll,
-            disabled: disabled || upload.isUploading,
-            children: "Clear All"
-          }
-        ),
-        hasPendingFiles && !autoUpload && /* @__PURE__ */ jsx(
+        hasFiles && /* @__PURE__ */ jsxs(Fragment, { children: [
+          /* @__PURE__ */ jsxs("span", { className: "sirv-uploader__file-count", children: [
+            showStagedMode ? stagedFiles.length : upload.files.length,
+            " ",
+            labels.filesSelected
+          ] }),
+          /* @__PURE__ */ jsx(
+            "button",
+            {
+              type: "button",
+              className: "sirv-btn",
+              onClick: handleClearAll,
+              disabled: disabled || upload.isUploading,
+              children: labels.clearAll
+            }
+          )
+        ] }),
+        showStagedMode && hasPendingFiles && /* @__PURE__ */ jsxs(
           "button",
           {
             type: "button",
             className: "sirv-btn sirv-btn--primary",
             onClick: handleUploadAll,
+            disabled,
+            children: [
+              /* @__PURE__ */ jsx(UploadIcon, {}),
+              labels.upload
+            ]
+          }
+        ),
+        !showStagedMode && hasPendingFiles && !autoUpload && /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: "sirv-btn sirv-btn--primary",
+            onClick: upload.uploadAll,
             disabled: disabled || upload.isUploading,
-            children: upload.isUploading ? labels.uploading : "Upload All"
+            children: upload.isUploading ? labels.uploading : labels.upload
           }
         )
       ] })
     ] }),
-    hasFiles && /* @__PURE__ */ jsx(FileListSummary, { files: upload.files }),
+    hasFiles && autoUpload && /* @__PURE__ */ jsx(FileListSummary, { files: upload.files }),
     filePicker && browseEndpoint && /* @__PURE__ */ jsx(
       FilePicker,
       {
@@ -1749,6 +2547,6 @@ function SirvUploader({
   ] });
 }
 
-export { ACCEPTED_IMAGE_FORMATS, DEFAULT_MAX_FILE_SIZE, DropZone, FileList, FileListSummary, FilePicker, SirvUploader, SpreadsheetImport, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getImageDimensions, getMimeType, isHeifFile, isImageFile, isSpreadsheetFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useSirvUpload, validateFileSize };
+export { ACCEPTED_3D_FORMATS, ACCEPTED_ALL_FORMATS, ACCEPTED_IMAGE_FORMATS, ACCEPTED_VIDEO_FORMATS, DEFAULT_MAX_FILE_SIZE, DropZone, FileList, FileListSummary, FilePicker, SirvUploader, SpreadsheetImport, StagedFilesGrid, canPreviewFile, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getFileCategory, getImageDimensions, getMimeType, is3DModelFile, isHeifFile, isImageFile, isPdfFile, isSpreadsheetFile, isSvgFile, isVideoFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useDropboxChooser, useGoogleDrivePicker, useSirvUpload, validateFileSize };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map

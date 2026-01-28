@@ -283,7 +283,7 @@ export function SpreadsheetImport({
               onClick={handleImport}
               disabled={!selectedColumn || isLoading}
             >
-              {isLoading ? 'Importing...' : labels.import || 'Import URLs'}
+              {isLoading ? 'Adding images...' : `Add ${result.estimatedImageCounts[result.headers.indexOf(selectedColumn)] || 0} images`}
             </button>
           </div>
         </div>
