@@ -136,6 +136,20 @@ Get your Dropbox App Key from [Dropbox Developers](https://www.dropbox.com/devel
 
 Get your Google credentials from [Google Cloud Console](https://console.cloud.google.com).
 
+#### Security Note
+
+Exposing the Google API key in client-side code is safe **when properly configured**. The API key alone cannot access any user data - it's just an identifier that tells Google "this request is from an allowed app." The actual authorization happens via OAuth (clientId), which requires explicit user consent.
+
+**Required restrictions in Google Cloud Console** (APIs & Services → Credentials → Your API Key):
+
+1. **Application restrictions**: Set to "HTTP referrers" and add your domain(s)
+   ```
+   yourdomain.com/*
+   ```
+2. **API restrictions**: Restrict to "Google Drive Picker API" only
+
+Without these restrictions, someone could abuse your API quota. With them, the key is useless outside your domain. This is the same pattern used by Google Maps and other client-side Google APIs.
+
 ### Multi-Format Support
 
 Enable support for videos, 3D models, and PDFs:

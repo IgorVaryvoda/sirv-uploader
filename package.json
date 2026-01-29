@@ -1,6 +1,6 @@
 {
   "name": "@igorvaryvoda/sirv-upload-widget",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A React file upload widget for Sirv CDN with batch uploads, CSV/Excel import, and file browser",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
