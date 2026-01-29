@@ -2949,33 +2949,30 @@ function SirvUploader({
         enableEditor: imageEditor,
         labels: stagedGridLabels
       }
-    ) : /* @__PURE__ */ jsxs(Fragment, { children: [
-      dragDrop && /* @__PURE__ */ jsx(
-        DropZone,
-        {
-          onFiles: handleFiles,
-          onSpreadsheet: csvImport ? handleSpreadsheet : void 0,
-          accept,
-          maxFiles: batch ? maxFiles : 1,
-          maxFileSize,
-          disabled,
-          compact,
-          enablePaste: paste,
-          acceptAllAssets: allAssets,
-          labels: dropzoneLabels,
-          children
-        }
-      ),
-      upload.files.length > 0 && /* @__PURE__ */ jsx(
-        FileList,
-        {
-          files: upload.files,
-          onRemove: handleRemove,
-          onRetry: upload.retryFile,
-          labels: fileListLabels
-        }
-      )
-    ] }) }),
+    ) : upload.files.length > 0 ? /* @__PURE__ */ jsx(
+      FileList,
+      {
+        files: upload.files,
+        onRemove: handleRemove,
+        onRetry: upload.retryFile,
+        labels: fileListLabels
+      }
+    ) : dragDrop && /* @__PURE__ */ jsx(
+      DropZone,
+      {
+        onFiles: handleFiles,
+        onSpreadsheet: csvImport ? handleSpreadsheet : void 0,
+        accept,
+        maxFiles: batch ? maxFiles : 1,
+        maxFileSize,
+        disabled,
+        compact,
+        enablePaste: paste,
+        acceptAllAssets: allAssets,
+        labels: dropzoneLabels,
+        children
+      }
+    ) }),
     activeTab === "urls" && csvImport && /* @__PURE__ */ jsx(SpreadsheetImport, { onUrls: handleUrls }),
     externalImport.isImporting && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__import-progress", children: [
       /* @__PURE__ */ jsx("div", { className: "sirv-uploader__import-spinner" }),

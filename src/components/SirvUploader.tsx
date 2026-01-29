@@ -426,34 +426,30 @@ export function SirvUploader({
               enableEditor={imageEditor}
               labels={stagedGridLabels}
             />
+          ) : upload.files.length > 0 ? (
+            <FileList
+              files={upload.files}
+              onRemove={handleRemove}
+              onRetry={upload.retryFile}
+              labels={fileListLabels}
+            />
           ) : (
-            <>
-              {dragDrop && (
-                <DropZone
-                  onFiles={handleFiles}
-                  onSpreadsheet={csvImport ? handleSpreadsheet : undefined}
-                  accept={accept}
-                  maxFiles={batch ? maxFiles : 1}
-                  maxFileSize={maxFileSize}
-                  disabled={disabled}
-                  compact={compact}
-                  enablePaste={paste}
-                  acceptAllAssets={allAssets}
-                  labels={dropzoneLabels}
-                >
-                  {children}
-                </DropZone>
-              )}
-
-              {upload.files.length > 0 && (
-                <FileList
-                  files={upload.files}
-                  onRemove={handleRemove}
-                  onRetry={upload.retryFile}
-                  labels={fileListLabels}
-                />
-              )}
-            </>
+            dragDrop && (
+              <DropZone
+                onFiles={handleFiles}
+                onSpreadsheet={csvImport ? handleSpreadsheet : undefined}
+                accept={accept}
+                maxFiles={batch ? maxFiles : 1}
+                maxFileSize={maxFileSize}
+                disabled={disabled}
+                compact={compact}
+                enablePaste={paste}
+                acceptAllAssets={allAssets}
+                labels={dropzoneLabels}
+              >
+                {children}
+              </DropZone>
+            )
           )}
         </>
       )}
