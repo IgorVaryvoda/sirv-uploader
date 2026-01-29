@@ -64,12 +64,14 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
   const abortControllers = useRef<Map<string, AbortController>>(new Map())
   const uploadQueue = useRef<string[]>([])
   const activeUploads = useRef<number>(0)
+  const filesRef = useRef<SirvFile[]>([])
 
   // Update a file's state
   const updateFile = useCallback((id: string, updates: Partial<SirvFile>) => {
-    setFiles((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, ...updates } : f))
+    filesRef.current = filesRef.current.map((f) =>
+      f.id === id ? { ...f, ...updates } : f
     )
+    setFiles(filesRef.current)
   }, [])
 
   // Upload file through proxy endpoint to Sirv REST API
@@ -124,8 +126,15 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
   // Main upload function
   const uploadFile = useCallback(
     async (id: string): Promise<void> => {
-      const file = files.find((f) => f.id === id)
-      if (!file || file.status === 'uploading' || file.status === 'success') return
+      const file = filesRef.current.find((f) => f.id === id)
+      if (!file || file.status === 'uploading' || file.status === 'success') {
+        // File not found or already processed - decrement counter and process next
+        // (counter was incremented by processQueue before calling this)
+        activeUploads.current--
+        // Use setTimeout to avoid synchronous recursion
+        setTimeout(() => processQueue(), 0)
+        return
+      }
 
       const controller = new AbortController()
       abortControllers.current.set(id, controller)
@@ -135,8 +144,8 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
 
         await uploadWithProxy(file, controller.signal)
 
-        // Notify success
-        const updatedFile = files.find((f) => f.id === id)
+        // Notify success - get fresh file reference
+        const updatedFile = filesRef.current.find((f) => f.id === id)
         if (updatedFile && onUpload) {
           onUpload([{ ...updatedFile, status: 'success' }])
         }
@@ -155,16 +164,18 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
         processQueue()
       }
     },
-    [files, proxyEndpoint, uploadWithProxy, updateFile, onUpload, onError]
+    [proxyEndpoint, uploadWithProxy, updateFile, onUpload, onError]
   )
 
   // Process upload queue with concurrency limit
+  // Use setTimeout to avoid synchronous recursive calls
   const processQueue = useCallback(() => {
     while (activeUploads.current < concurrency && uploadQueue.current.length > 0) {
       const id = uploadQueue.current.shift()
       if (id) {
         activeUploads.current++
-        uploadFile(id)
+        // Defer to avoid synchronous recursion when upload completes quickly
+        void uploadFile(id)
       }
     }
   }, [concurrency, uploadFile])
@@ -179,7 +190,9 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
   // Add files to the list
   const addFiles = useCallback(
     (newFiles: SirvFile[]) => {
-      setFiles((prev) => [...prev, ...newFiles])
+      // Update ref immediately so processQueue can find the files
+      filesRef.current = [...filesRef.current, ...newFiles]
+      setFiles(filesRef.current)
 
       if (autoUpload) {
         // Queue new files for upload
@@ -221,8 +234,9 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
     // Remove from queue
     uploadQueue.current = uploadQueue.current.filter((qid) => qid !== id)
 
-    // Remove from list
-    setFiles((prev) => prev.filter((f) => f.id !== id))
+    // Remove from list - update ref immediately
+    filesRef.current = filesRef.current.filter((f) => f.id !== id)
+    setFiles(filesRef.current)
   }, [])
 
   // Clear all files
@@ -232,14 +246,18 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
     abortControllers.current.clear()
     uploadQueue.current = []
     activeUploads.current = 0
+    filesRef.current = []
     setFiles([])
   }, [])
 
   // Retry a failed upload
   const retryFile = useCallback(
     async (id: string): Promise<void> => {
-      uploadQueue.current.push(id)
-      processQueue()
+      // Prevent duplicate entries in the queue
+      if (!uploadQueue.current.includes(id)) {
+        uploadQueue.current.push(id)
+        processQueue()
+      }
     },
     [processQueue]
   )

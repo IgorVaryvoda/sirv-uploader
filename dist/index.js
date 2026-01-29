@@ -192,6 +192,38 @@ function getMimeType(file) {
   };
   return mimeTypes[ext] || "application/octet-stream";
 }
+async function createSirvFile(options) {
+  const {
+    file,
+    filename = file.name,
+    skipPreview = false,
+    skipDimensions = false,
+    status = "pending",
+    error
+  } = options;
+  const category = getFileCategory(file);
+  const canPreview = canPreviewFile(file) && !skipPreview;
+  let previewUrl = "";
+  if (canPreview) {
+    previewUrl = URL.createObjectURL(file);
+  }
+  let dimensions;
+  if (canPreview && !skipDimensions) {
+    dimensions = await getImageDimensions(file) || void 0;
+  }
+  return {
+    id: generateId(),
+    file,
+    filename,
+    previewUrl,
+    dimensions,
+    size: file.size,
+    fileCategory: category,
+    status,
+    progress: 0,
+    error
+  };
+}
 
 // src/utils/csv-parser.ts
 var DELIMITERS = [",", "	", ";", "|"];
@@ -288,6 +320,23 @@ function findColumnIndex(headers, column) {
     if (columnIndex !== -1) return columnIndex;
   }
   return headersLower.findIndex((h) => h === "url");
+}
+var URL_COLUMN_NAMES = ["url", "image", "images", "image_url", "imageurl", "img", "src", "source"];
+function detectUrlColumnIndex(headers, getCellValue, rowCount) {
+  const headersLower = headers.map((h) => h.toLowerCase());
+  for (const name of URL_COLUMN_NAMES) {
+    const idx = headersLower.indexOf(name);
+    if (idx !== -1) return idx;
+  }
+  for (let col = 0; col < headers.length; col++) {
+    for (let row = 1; row < Math.min(100, rowCount); row++) {
+      const cell = getCellValue(row, col)?.trim();
+      if (cell && cell.startsWith("http")) {
+        return col;
+      }
+    }
+  }
+  return 0;
 }
 var defaultUrlValidator = (url) => {
   try {
@@ -390,23 +439,14 @@ function parseCsvClient(csvContent, options = {}) {
   const delimiter = detectDelimiter(csvContent);
   const headers = getCsvHeaders(csvContent, delimiter);
   const rowCount = lines.length - 1;
-  const headersLower = headers.map((h) => h.toLowerCase());
-  let urlColumnIndex = headersLower.findIndex(
-    (h) => h === "url" || h === "image" || h === "images" || h === "image_url"
+  const urlColumnIndex = detectUrlColumnIndex(
+    headers,
+    (rowIndex, colIndex) => {
+      const values = parseCsvRow(lines[rowIndex], delimiter);
+      return values[colIndex] ?? "";
+    },
+    lines.length
   );
-  if (urlColumnIndex === -1) {
-    for (let col = 0; col < headers.length && urlColumnIndex === -1; col++) {
-      for (let row = 1; row < Math.min(100, lines.length); row++) {
-        const values = parseCsvRow(lines[row], delimiter);
-        const cell = values[col]?.trim();
-        if (cell && cell.startsWith("http")) {
-          urlColumnIndex = col;
-          break;
-        }
-      }
-    }
-  }
-  if (urlColumnIndex === -1) urlColumnIndex = 0;
   const sampleRows = getCsvSampleRows(lines, urlColumnIndex, delimiter);
   const estimatedImageCounts = headers.map(
     (_, colIndex) => estimateCsvImageCount(lines, colIndex, delimiter)
@@ -460,22 +500,11 @@ async function parseExcelClient(arrayBuffer, options = {}) {
   const rows = await parseExcelArrayBuffer(arrayBuffer);
   const headers = getExcelHeaders(rows);
   const rowCount = rows.length - 1;
-  const headersLower = headers.map((h) => h.toLowerCase());
-  let urlColumnIndex = headersLower.findIndex(
-    (h) => h === "url" || h === "image" || h === "images" || h === "image_url"
+  const urlColumnIndex = detectUrlColumnIndex(
+    headers,
+    (rowIndex, colIndex) => cellToString(rows[rowIndex]?.[colIndex]),
+    rows.length
   );
-  if (urlColumnIndex === -1) {
-    for (let col = 0; col < headers.length && urlColumnIndex === -1; col++) {
-      for (let row = 1; row < Math.min(100, rows.length); row++) {
-        const cell = cellToString(rows[row][col]).trim();
-        if (cell && cell.startsWith("http")) {
-          urlColumnIndex = col;
-          break;
-        }
-      }
-    }
-  }
-  if (urlColumnIndex === -1) urlColumnIndex = 0;
   const sampleRows = getExcelSampleRows(rows, urlColumnIndex);
   const estimatedImageCounts = headers.map(
     (_, colIndex) => estimateExcelImageCount(rows, colIndex)
@@ -977,9 +1006,11 @@ function useImageEditor({
   const [imageSize, setImageSize] = react.useState({ width: 0, height: 0 });
   const [canvasSize, setCanvasSize] = react.useState({ width: 0, height: 0 });
   react.useEffect(() => {
+    let cancelled = false;
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
+      if (cancelled) return;
       imageRef.current = img;
       setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
       const scale = Math.min(
@@ -995,10 +1026,17 @@ function useImageEditor({
       setIsLoading(false);
     };
     img.onerror = () => {
+      if (cancelled) return;
       setIsLoading(false);
       console.error("Failed to load image for editing");
     };
     img.src = previewUrl;
+    return () => {
+      cancelled = true;
+      img.onload = null;
+      img.onerror = null;
+      img.src = "";
+    };
   }, [previewUrl, maxCanvasSize]);
   react.useEffect(() => {
     if (!imageLoaded || !canvasRef.current || !imageRef.current) return;
@@ -1801,17 +1839,21 @@ function SpreadsheetImport({
   const [error, setError] = react.useState(null);
   const [selectedColumn, setSelectedColumn] = react.useState("");
   const inputRef = react.useRef(null);
+  const storedFileRef = react.useRef(null);
   const processFile = react.useCallback(async (file) => {
     setIsLoading(true);
     setError(null);
     setResult(null);
+    storedFileRef.current = null;
     try {
       let parseResult;
       if (file.name.endsWith(".csv") || file.name.endsWith(".txt")) {
         const text = await file.text();
+        storedFileRef.current = { type: "csv", content: text };
         parseResult = parseCsvClient(text, { previewOnly: true });
       } else if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
         const buffer = await file.arrayBuffer();
+        storedFileRef.current = { type: "excel", content: buffer };
         parseResult = await parseExcelClient(buffer, { previewOnly: true });
       } else {
         throw new Error("Unsupported file type. Please use CSV, XLSX, or TXT.");
@@ -1861,13 +1903,26 @@ function SpreadsheetImport({
     [processFile]
   );
   const handleImport = react.useCallback(async () => {
-    if (!result || !selectedColumn) return;
+    if (!result || !selectedColumn || !storedFileRef.current) return;
     setIsLoading(true);
     try {
-      const validUrls = result.urls.filter((u) => u.valid).map((u) => u.url);
+      let fullParseResult;
+      if (storedFileRef.current.type === "csv") {
+        fullParseResult = parseCsvClient(storedFileRef.current.content, {
+          column: selectedColumn,
+          previewOnly: false
+        });
+      } else {
+        fullParseResult = await parseExcelClient(storedFileRef.current.content, {
+          column: selectedColumn,
+          previewOnly: false
+        });
+      }
+      const validUrls = fullParseResult.urls.filter((u) => u.valid).map((u) => u.url);
       onUrls(validUrls);
       setResult(null);
       setSelectedColumn("");
+      storedFileRef.current = null;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to import URLs");
     } finally {
@@ -1878,6 +1933,7 @@ function SpreadsheetImport({
     setResult(null);
     setSelectedColumn("");
     setError(null);
+    storedFileRef.current = null;
   }, []);
   return /* @__PURE__ */ jsxRuntime.jsx("div", { className: clsx3__default.default("sirv-spreadsheet", className), children: !result ? /* @__PURE__ */ jsxRuntime.jsxs(jsxRuntime.Fragment, { children: [
     /* @__PURE__ */ jsxRuntime.jsxs(
@@ -2027,10 +2083,12 @@ function useSirvUpload(options) {
   const abortControllers = react.useRef(/* @__PURE__ */ new Map());
   const uploadQueue = react.useRef([]);
   const activeUploads = react.useRef(0);
+  const filesRef = react.useRef([]);
   const updateFile = react.useCallback((id, updates) => {
-    setFiles(
-      (prev) => prev.map((f) => f.id === id ? { ...f, ...updates } : f)
+    filesRef.current = filesRef.current.map(
+      (f) => f.id === id ? { ...f, ...updates } : f
     );
+    setFiles(filesRef.current);
   }, []);
   const uploadWithProxy = react.useCallback(
     async (file, signal) => {
@@ -2068,14 +2126,18 @@ function useSirvUpload(options) {
   );
   const uploadFile = react.useCallback(
     async (id) => {
-      const file = files.find((f) => f.id === id);
-      if (!file || file.status === "uploading" || file.status === "success") return;
+      const file = filesRef.current.find((f) => f.id === id);
+      if (!file || file.status === "uploading" || file.status === "success") {
+        activeUploads.current--;
+        setTimeout(() => processQueue(), 0);
+        return;
+      }
       const controller = new AbortController();
       abortControllers.current.set(id, controller);
       try {
         updateFile(id, { status: "uploading", progress: 0, error: void 0 });
         await uploadWithProxy(file, controller.signal);
-        const updatedFile = files.find((f) => f.id === id);
+        const updatedFile = filesRef.current.find((f) => f.id === id);
         if (updatedFile && onUpload) {
           onUpload([{ ...updatedFile, status: "success" }]);
         }
@@ -2093,14 +2155,14 @@ function useSirvUpload(options) {
         processQueue();
       }
     },
-    [files, proxyEndpoint, uploadWithProxy, updateFile, onUpload, onError]
+    [proxyEndpoint, uploadWithProxy, updateFile, onUpload, onError]
   );
   const processQueue = react.useCallback(() => {
     while (activeUploads.current < concurrency && uploadQueue.current.length > 0) {
       const id = uploadQueue.current.shift();
       if (id) {
         activeUploads.current++;
-        uploadFile(id);
+        void uploadFile(id);
       }
     }
   }, [concurrency, uploadFile]);
@@ -2111,7 +2173,8 @@ function useSirvUpload(options) {
   }, [files, processQueue]);
   const addFiles = react.useCallback(
     (newFiles) => {
-      setFiles((prev) => [...prev, ...newFiles]);
+      filesRef.current = [...filesRef.current, ...newFiles];
+      setFiles(filesRef.current);
       if (autoUpload) {
         uploadQueue.current.push(...newFiles.map((f) => f.id));
         processQueue();
@@ -2142,19 +2205,23 @@ function useSirvUpload(options) {
       controller.abort();
     }
     uploadQueue.current = uploadQueue.current.filter((qid) => qid !== id);
-    setFiles((prev) => prev.filter((f) => f.id !== id));
+    filesRef.current = filesRef.current.filter((f) => f.id !== id);
+    setFiles(filesRef.current);
   }, []);
   const clearFiles = react.useCallback(() => {
     abortControllers.current.forEach((controller) => controller.abort());
     abortControllers.current.clear();
     uploadQueue.current = [];
     activeUploads.current = 0;
+    filesRef.current = [];
     setFiles([]);
   }, []);
   const retryFile = react.useCallback(
     async (id) => {
-      uploadQueue.current.push(id);
-      processQueue();
+      if (!uploadQueue.current.includes(id)) {
+        uploadQueue.current.push(id);
+        processQueue();
+      }
     },
     [processQueue]
   );
@@ -2391,9 +2458,13 @@ function useGoogleDrivePicker({
     setIsReady(true);
   }, []);
   const getAccessToken = react.useCallback(async () => {
-    if (accessTokenRef.current) {
-      return accessTokenRef.current;
+    const storedToken = getStoredToken();
+    if (storedToken) {
+      accessTokenRef.current = storedToken;
+      return storedToken;
     }
+    accessTokenRef.current = null;
+    setHasSession(false);
     return new Promise((resolve) => {
       const tokenClient = window.google.accounts.oauth2.initTokenClient({
         client_id: clientId,
@@ -2712,9 +2783,18 @@ function SirvUploader({
   const handleRemove = react.useCallback(
     (id) => {
       if (showStagedMode) {
-        setStagedFiles((prev) => prev.filter((f) => f.id !== id));
+        setStagedFiles((prev) => {
+          const fileToRemove = prev.find((f) => f.id === id);
+          if (fileToRemove?.previewUrl) {
+            URL.revokeObjectURL(fileToRemove.previewUrl);
+          }
+          return prev.filter((f) => f.id !== id);
+        });
       } else {
         const file = upload.files.find((f) => f.id === id);
+        if (file?.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl);
+        }
         upload.removeFile(id);
         if (file) onRemove?.(file);
       }
@@ -2746,11 +2826,21 @@ function SirvUploader({
   }, [upload, stagedFiles]);
   const handleClearAll = react.useCallback(() => {
     if (showStagedMode) {
+      stagedFiles.forEach((file) => {
+        if (file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl);
+        }
+      });
       setStagedFiles([]);
     } else {
+      upload.files.forEach((file) => {
+        if (file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl);
+        }
+      });
       upload.clearFiles();
     }
-  }, [upload, showStagedMode]);
+  }, [upload, showStagedMode, stagedFiles]);
   const dropboxChooser = useDropboxChooser({
     appKey: dropbox?.appKey || "",
     onSelect: react.useCallback(
@@ -2882,7 +2972,7 @@ function SirvUploader({
           children
         }
       ),
-      hasFiles && autoUpload && /* @__PURE__ */ jsxRuntime.jsx(
+      upload.files.length > 0 && /* @__PURE__ */ jsxRuntime.jsx(
         FileList,
         {
           files: upload.files,
@@ -2975,7 +3065,7 @@ function SirvUploader({
         )
       ] })
     ] }),
-    hasFiles && autoUpload && /* @__PURE__ */ jsxRuntime.jsx(FileListSummary, { files: upload.files })
+    upload.files.length > 0 && /* @__PURE__ */ jsxRuntime.jsx(FileListSummary, { files: upload.files })
   ] });
 }
 
@@ -2993,8 +3083,10 @@ exports.SpreadsheetImport = SpreadsheetImport;
 exports.StagedFilesGrid = StagedFilesGrid;
 exports.canPreviewFile = canPreviewFile;
 exports.convertHeicWithFallback = convertHeicWithFallback;
+exports.createSirvFile = createSirvFile;
 exports.defaultUrlValidator = defaultUrlValidator;
 exports.detectDelimiter = detectDelimiter;
+exports.detectUrlColumnIndex = detectUrlColumnIndex;
 exports.formatFileSize = formatFileSize;
 exports.generateId = generateId;
 exports.getFileCategory = getFileCategory;

@@ -322,21 +322,35 @@ interface SirvUploaderLabels {
     conflictMessage: string;
     filesSelected: string;
 }
+/**
+ * @deprecated Import from hooks/useSirvUpload.ts instead
+ */
 interface UseSirvUploadOptions$1 {
-    endpoint: string;
+    /** Proxy endpoint URL for uploading files to Sirv */
+    proxyEndpoint: string;
+    /** Default upload folder */
     folder: string;
+    /** Conflict resolution strategy */
     onConflict: ConflictResolution | 'ask';
+    /** Max concurrent uploads */
     concurrency: number;
+    /** Auto-upload on file add */
     autoUpload: boolean;
+    /** Max file size */
     maxFileSize: number;
+    /** Callback on successful uploads */
     onUpload?: (files: SirvFile[]) => void;
+    /** Callback on errors */
     onError?: (error: string, file?: SirvFile) => void;
 }
+/**
+ * @deprecated Import from hooks/useSirvUpload.ts instead
+ */
 interface UseSirvUploadReturn$1 {
     /** Current files in the queue */
     files: SirvFile[];
-    /** Add files to the queue */
-    addFiles: (files: File[]) => void;
+    /** Add SirvFile objects to the queue */
+    addFiles: (files: SirvFile[]) => void;
     /** Add URLs (from CSV/spreadsheet) */
     addUrls: (urls: string[]) => void;
     /** Remove a file from the queue */
@@ -351,10 +365,6 @@ interface UseSirvUploadReturn$1 {
     retryFile: (id: string) => Promise<void>;
     /** Cancel an in-progress upload */
     cancelUpload: (id: string) => void;
-    /** Resolve a conflict */
-    resolveConflict: (id: string, resolution: ConflictResolution) => void;
-    /** Current conflict needing resolution (if onConflict='ask') */
-    currentConflict: ConflictInfo | null;
     /** Overall upload progress (0-100) */
     progress: number;
     /** True if any uploads are in progress */
@@ -799,6 +809,45 @@ declare function getImageDimensions(file: File): Promise<{
 } | null>;
 declare function formatFileSize(bytes: number): string;
 declare function getMimeType(file: File): string;
+/**
+ * Options for creating a SirvFile object
+ */
+interface CreateSirvFileOptions {
+    file: File;
+    /** Override the filename (defaults to file.name) */
+    filename?: string;
+    /** Skip generating preview URL (for non-image files) */
+    skipPreview?: boolean;
+    /** Skip getting image dimensions */
+    skipDimensions?: boolean;
+    /** Initial status (defaults to 'pending') */
+    status?: 'pending' | 'error';
+    /** Error message if status is 'error' */
+    error?: string;
+}
+/**
+ * Result of creating a SirvFile
+ */
+interface CreateSirvFileResult {
+    id: string;
+    file: File;
+    filename: string;
+    previewUrl: string;
+    dimensions?: {
+        width: number;
+        height: number;
+    };
+    size: number;
+    fileCategory: 'image' | 'video' | '3d' | 'pdf' | 'other';
+    status: 'pending' | 'error';
+    progress: number;
+    error?: string;
+}
+/**
+ * Create a SirvFile object from a File with proper preview URL and dimensions
+ * This is the canonical way to create SirvFile objects to ensure consistency.
+ */
+declare function createSirvFile(options: CreateSirvFileOptions): Promise<CreateSirvFileResult>;
 
 declare const DELIMITERS: readonly [",", "\t", ";", "|"];
 type CsvDelimiter = (typeof DELIMITERS)[number];
@@ -806,6 +855,12 @@ type CsvDelimiter = (typeof DELIMITERS)[number];
  * Detect the delimiter used in CSV content by analyzing the first few lines
  */
 declare function detectDelimiter(csvContent: string): CsvDelimiter;
+/**
+ * Auto-detect the likely URL column index by checking:
+ * 1. Common URL-related header names
+ * 2. Cells that start with 'http'
+ */
+declare function detectUrlColumnIndex(headers: string[], getCellValue: (rowIndex: number, colIndex: number) => string, rowCount: number): number;
 interface ParsedUrlItem {
     url: string;
     path: string;
@@ -849,4 +904,4 @@ declare function parseExcelClient(arrayBuffer: ArrayBuffer, options?: ParseOptio
  */
 declare function isSpreadsheetFile(file: File): boolean;
 
-export { ACCEPTED_3D_FORMATS, ACCEPTED_ALL_FORMATS, ACCEPTED_IMAGE_FORMATS, ACCEPTED_VIDEO_FORMATS, type AspectRatio, type BrowseItem, type BrowseRequest, type BrowseResponse, type CheckRequest, type CheckResponse, type ClientParseResult, type ConflictInfo, type ConflictResolution, type CropArea, type CsvParseOptions, type CsvParseResult, DEFAULT_MAX_FILE_SIZE, type DeleteRequest, type DeleteResponse, DropZone, type DropZoneProps, type DropboxConfig, type DropboxFile, type EditorState, type FileCategory, FileList, type FileListProps, FileListSummary, type GoogleDriveConfig, type GoogleDriveFile, type ImageDimensions, ImageEditor, type ImageEditorProps, type ParsedUrl, type ParsedUrlItem, type SirvFile, SirvUploader, type SirvUploaderLabels, type SirvUploaderProps, SpreadsheetImport, type SpreadsheetImportProps, StagedFilesGrid, type StagedFilesGridProps, type UploadRequest, type UploadResponse, type UploadStatus, type UrlValidator, type UseDropboxChooserOptions, type UseGoogleDrivePickerOptions, type UseImageEditorOptions, type UseImageEditorReturn, type UseSirvUploadOptions$1 as UseSirvUploadOptions, type UseSirvUploadReturn$1 as UseSirvUploadReturn, canPreviewFile, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getFileCategory, getImageDimensions, getMimeType, is3DModelFile, isHeifFile, isImageFile, isPdfFile, isSpreadsheetFile, isSvgFile, isVideoFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useDropboxChooser, useGoogleDrivePicker, useImageEditor, useSirvUpload, validateFileSize };
+export { ACCEPTED_3D_FORMATS, ACCEPTED_ALL_FORMATS, ACCEPTED_IMAGE_FORMATS, ACCEPTED_VIDEO_FORMATS, type AspectRatio, type BrowseItem, type BrowseRequest, type BrowseResponse, type CheckRequest, type CheckResponse, type ClientParseResult, type ConflictInfo, type ConflictResolution, type CreateSirvFileOptions, type CreateSirvFileResult, type CropArea, type CsvParseOptions, type CsvParseResult, DEFAULT_MAX_FILE_SIZE, type DeleteRequest, type DeleteResponse, DropZone, type DropZoneProps, type DropboxConfig, type DropboxFile, type EditorState, type FileCategory, FileList, type FileListProps, FileListSummary, type GoogleDriveConfig, type GoogleDriveFile, type ImageDimensions, ImageEditor, type ImageEditorProps, type ParsedUrl, type ParsedUrlItem, type SirvFile, SirvUploader, type SirvUploaderLabels, type SirvUploaderProps, SpreadsheetImport, type SpreadsheetImportProps, StagedFilesGrid, type StagedFilesGridProps, type UploadRequest, type UploadResponse, type UploadStatus, type UrlValidator, type UseDropboxChooserOptions, type UseGoogleDrivePickerOptions, type UseImageEditorOptions, type UseImageEditorReturn, type UseSirvUploadOptions$1 as UseSirvUploadOptions, type UseSirvUploadReturn$1 as UseSirvUploadReturn, canPreviewFile, convertHeicWithFallback, createSirvFile, defaultUrlValidator, detectDelimiter, detectUrlColumnIndex, formatFileSize, generateId, getFileCategory, getImageDimensions, getMimeType, is3DModelFile, isHeifFile, isImageFile, isPdfFile, isSpreadsheetFile, isSvgFile, isVideoFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useDropboxChooser, useGoogleDrivePicker, useImageEditor, useSirvUpload, validateFileSize };

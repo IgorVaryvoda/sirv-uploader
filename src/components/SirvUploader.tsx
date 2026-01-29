@@ -227,13 +227,22 @@ export function SirvUploader({
     [externalImport]
   )
 
-  // Handle file removal
+  // Handle file removal - also revoke preview URLs to prevent memory leaks
   const handleRemove = useCallback(
     (id: string) => {
       if (showStagedMode) {
-        setStagedFiles((prev) => prev.filter((f) => f.id !== id))
+        setStagedFiles((prev) => {
+          const fileToRemove = prev.find((f) => f.id === id)
+          if (fileToRemove?.previewUrl) {
+            URL.revokeObjectURL(fileToRemove.previewUrl)
+          }
+          return prev.filter((f) => f.id !== id)
+        })
       } else {
         const file = upload.files.find((f) => f.id === id)
+        if (file?.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl)
+        }
         upload.removeFile(id)
         if (file) onRemove?.(file)
       }
@@ -274,14 +283,24 @@ export function SirvUploader({
     setStagedFiles([])
   }, [upload, stagedFiles])
 
-  // Handle clear all
+  // Handle clear all - revoke all preview URLs to prevent memory leaks
   const handleClearAll = useCallback(() => {
     if (showStagedMode) {
+      stagedFiles.forEach((file) => {
+        if (file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl)
+        }
+      })
       setStagedFiles([])
     } else {
+      upload.files.forEach((file) => {
+        if (file.previewUrl) {
+          URL.revokeObjectURL(file.previewUrl)
+        }
+      })
       upload.clearFiles()
     }
-  }, [upload, showStagedMode])
+  }, [upload, showStagedMode, stagedFiles])
 
   // Dropbox integration
   const dropboxChooser = useDropboxChooser({
@@ -426,7 +445,7 @@ export function SirvUploader({
                 </DropZone>
               )}
 
-              {hasFiles && autoUpload && (
+              {upload.files.length > 0 && (
                 <FileList
                   files={upload.files}
                   onRemove={handleRemove}
@@ -528,7 +547,7 @@ export function SirvUploader({
       )}
 
       {/* Summary */}
-      {hasFiles && autoUpload && <FileListSummary files={upload.files} />}
+      {upload.files.length > 0 && <FileListSummary files={upload.files} />}
     </div>
   )
 }
