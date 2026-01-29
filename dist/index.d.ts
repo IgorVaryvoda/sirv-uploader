@@ -32,63 +32,50 @@ interface ConflictInfo {
     suggestedPath: string;
 }
 /**
- * For presigned URL mode, user's backend only needs ONE endpoint.
- * The widget uploads directly to Sirv's S3 endpoint.
+ * The widget uploads files through a proxy endpoint to Sirv's REST API.
+ * Your backend receives the file and forwards it to Sirv.
  *
  * Example backend implementation (Next.js):
  * ```typescript
- * import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
- * import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
- *
- * const s3 = new S3Client({
- *   endpoint: 'https://s3.sirv.com',
- *   region: 'us-east-1',
- *   credentials: {
- *     accessKeyId: process.env.SIRV_S3_KEY!,
- *     secretAccessKey: process.env.SIRV_S3_SECRET!,
- *   },
- *   forcePathStyle: true,
- * })
- *
+ * // app/api/sirv/upload/route.ts
  * export async function POST(req: Request) {
- *   const { filename, contentType, folder } = await req.json()
- *   const key = `${folder}/${filename}`.replace(/^\/+/, '')
+ *   const url = new URL(req.url)
+ *   const filename = url.searchParams.get('filename')!
+ *   const folder = url.searchParams.get('folder') || '/'
  *
- *   const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
- *     Bucket: process.env.SIRV_BUCKET!,
- *     Key: key,
- *     ContentType: contentType,
- *   }), { expiresIn: 300 })
+ *   // Get Sirv access token (you should cache this)
+ *   const tokenRes = await fetch('https://api.sirv.com/v2/token', {
+ *     method: 'POST',
+ *     headers: { 'Content-Type': 'application/json' },
+ *     body: JSON.stringify({
+ *       clientId: process.env.SIRV_CLIENT_ID,
+ *       clientSecret: process.env.SIRV_CLIENT_SECRET,
+ *     }),
+ *   })
+ *   const { token } = await tokenRes.json()
  *
- *   const publicUrl = `https://${process.env.SIRV_BUCKET}.sirv.com/${key}`
- *   return Response.json({ uploadUrl, publicUrl, path: '/' + key })
+ *   // Upload file to Sirv REST API
+ *   const path = `${folder}/${filename}`.replace(/\/+/g, '/')
+ *   const uploadRes = await fetch(
+ *     `https://api.sirv.com/v2/files/upload?filename=${encodeURIComponent(path)}`,
+ *     {
+ *       method: 'POST',
+ *       headers: {
+ *         'Authorization': `Bearer ${token}`,
+ *         'Content-Type': req.headers.get('Content-Type') || 'application/octet-stream',
+ *       },
+ *       body: req.body,
+ *     }
+ *   )
+ *
+ *   if (!uploadRes.ok) {
+ *     return Response.json({ success: false, error: 'Upload failed' }, { status: 500 })
+ *   }
+ *
+ *   const publicUrl = `https://${process.env.SIRV_ACCOUNT}.sirv.com${path}`
+ *   return Response.json({ success: true, url: publicUrl, path })
  * }
  * ```
- */
-/** POST {presignEndpoint} - Get a presigned upload URL */
-interface PresignRequest {
-    /** Target filename */
-    filename: string;
-    /** Content type of the file */
-    contentType: string;
-    /** Target folder path (e.g., "/uploads/2024") */
-    folder?: string;
-    /** File size in bytes (for validation) */
-    size?: number;
-}
-interface PresignResponse {
-    /** Presigned URL to upload directly to Sirv S3 */
-    uploadUrl: string;
-    /** Public CDN URL where file will be accessible */
-    publicUrl: string;
-    /** Path on Sirv (e.g., "/uploads/2024/image.jpg") */
-    path: string;
-    /** Error message if failed */
-    error?: string;
-}
-/**
- * For proxy mode, user's backend handles all Sirv operations.
- * Use this if you can't use presigned URLs or need more control.
  */
 /** POST {endpoint}/upload - Upload a file to Sirv */
 interface UploadRequest {
@@ -182,27 +169,19 @@ interface GoogleDriveConfig {
 }
 interface SirvUploaderProps {
     /**
-     * RECOMMENDED: Endpoint to get presigned upload URLs.
-     * Widget will POST { filename, contentType, folder } and expect { uploadUrl, publicUrl, path }
-     * Then upload directly to Sirv's S3 endpoint.
+     * Proxy endpoint URL for uploading files to Sirv.
+     * Your backend should forward the file to Sirv's REST API.
      *
-     * Your backend just needs to call AWS SDK's getSignedUrl with Sirv's S3 endpoint.
-     */
-    presignEndpoint?: string;
-    /**
-     * ALTERNATIVE: Base URL for full proxy endpoint.
-     * Use this if you can't use presigned URLs.
      * The widget will call:
-     * - POST {endpoint}/upload (with file data)
-     * - GET {endpoint}/browse
+     * - POST {endpoint}/upload?filename=...&folder=... (with file binary in body)
+     *
+     * Expected response: { success: true, url: "...", path: "..." }
+     *
+     * Optional endpoints for file browsing (if you want to enable Sirv file picker):
+     * - GET {endpoint}/browse?path=/folder
      * - DELETE {endpoint}/delete
      */
-    proxyEndpoint?: string;
-    /**
-     * Sirv account/bucket name (e.g., "myaccount" for myaccount.sirv.com)
-     * Required for file picker when using presigned URLs.
-     */
-    sirvAccount?: string;
+    proxyEndpoint: string;
     /**
      * Default folder to upload files to.
      * @default "/"
@@ -232,14 +211,14 @@ interface SirvUploaderProps {
         batch?: boolean;
         /** Enable CSV/Excel import tab. @default true */
         csvImport?: boolean;
-        /** Enable Sirv file picker. @default true */
-        filePicker?: boolean;
         /** Enable drag and drop. @default true */
         dragDrop?: boolean;
         /** Enable clipboard paste. @default true */
         paste?: boolean;
         /** Accept all asset types (images, videos, 3D, PDF). @default false */
         allAssets?: boolean;
+        /** Enable built-in image editor for staged files. @default true */
+        imageEditor?: boolean;
     };
     /**
      * Dropbox integration configuration.
@@ -383,34 +362,6 @@ interface UseSirvUploadReturn$1 {
     /** True if all files have been uploaded */
     isComplete: boolean;
 }
-interface UseFilePickerOptions {
-    endpoint: string;
-    fileType?: 'image' | 'video' | 'all';
-}
-interface UseFilePickerReturn {
-    /** Current folder path */
-    currentPath: string;
-    /** Items in current folder */
-    items: BrowseItem[];
-    /** Loading state */
-    isLoading: boolean;
-    /** Error message */
-    error: string | null;
-    /** Navigate to a folder */
-    navigateTo: (path: string) => void;
-    /** Go up one folder */
-    goUp: () => void;
-    /** Refresh current folder */
-    refresh: () => void;
-    /** Search within current folder */
-    search: (query: string) => void;
-    /** Select a file */
-    selectFile: (item: BrowseItem) => void;
-    /** Selected files */
-    selectedFiles: BrowseItem[];
-    /** Clear selection */
-    clearSelection: () => void;
-}
 interface ParsedUrl {
     url: string;
     path: string;
@@ -433,7 +384,7 @@ interface CsvParseResult {
     invalidCount: number;
 }
 
-declare function SirvUploader({ presignEndpoint, proxyEndpoint, sirvAccount, folder, onUpload, onError, onSelect, onRemove, features, dropbox, googleDrive, maxFiles, maxFileSize, accept, onConflict, autoUpload, concurrency, className, disabled, compact, theme, labels: customLabels, children, }: SirvUploaderProps): react_jsx_runtime.JSX.Element;
+declare function SirvUploader({ proxyEndpoint, folder, onUpload, onError, onSelect, onRemove, features, dropbox, googleDrive, maxFiles, maxFileSize, accept, onConflict, autoUpload, concurrency, className, disabled, compact, theme, labels: customLabels, children, }: SirvUploaderProps): react_jsx_runtime.JSX.Element;
 
 interface DropZoneProps {
     onFiles: (files: SirvFile[]) => void;
@@ -484,11 +435,13 @@ interface StagedFilesGridProps {
     files: SirvFile[];
     onRemove: (id: string) => void;
     onEdit?: (file: SirvFile) => void;
+    onFileEdited?: (id: string, editedFile: File, previewUrl: string) => void;
     onAddMore?: (files: SirvFile[]) => void;
     maxFiles?: number;
     accept?: string;
     disabled?: boolean;
     showFilenames?: boolean;
+    enableEditor?: boolean;
     className?: string;
     labels?: {
         addMore?: string;
@@ -496,28 +449,7 @@ interface StagedFilesGridProps {
         remove?: string;
     };
 }
-declare function StagedFilesGrid({ files, onRemove, onEdit, onAddMore, maxFiles, accept, disabled, showFilenames, className, labels, }: StagedFilesGridProps): react_jsx_runtime.JSX.Element;
-
-interface FilePickerProps {
-    endpoint: string;
-    isOpen: boolean;
-    onClose: () => void;
-    onSelect: (items: BrowseItem[]) => void;
-    fileType?: 'image' | 'video' | 'all';
-    multiple?: boolean;
-    initialPath?: string;
-    className?: string;
-    labels?: {
-        title?: string;
-        select?: string;
-        cancel?: string;
-        search?: string;
-        empty?: string;
-        loading?: string;
-        error?: string;
-    };
-}
-declare function FilePicker({ endpoint, isOpen, onClose, onSelect, fileType, multiple, initialPath, className, labels, }: FilePickerProps): react_jsx_runtime.JSX.Element | null;
+declare function StagedFilesGrid({ files, onRemove, onEdit, onFileEdited, onAddMore, maxFiles, accept, disabled, showFilenames, enableEditor, className, labels, }: StagedFilesGridProps): react_jsx_runtime.JSX.Element;
 
 interface SpreadsheetImportProps {
     onUrls: (urls: string[]) => void;
@@ -533,11 +465,39 @@ interface SpreadsheetImportProps {
 }
 declare function SpreadsheetImport({ onUrls, className, labels, }: SpreadsheetImportProps): react_jsx_runtime.JSX.Element;
 
+interface ImageEditorProps {
+    file: File;
+    previewUrl: string;
+    onApply: (editedFile: File, previewUrl: string) => void;
+    onCancel: () => void;
+    labels?: {
+        title?: string;
+        apply?: string;
+        cancel?: string;
+        reset?: string;
+        rotateLeft?: string;
+        rotateRight?: string;
+        flipHorizontal?: string;
+        flipVertical?: string;
+        crop?: string;
+        transform?: string;
+        aspectRatio?: string;
+        aspectFree?: string;
+    };
+}
+declare function ImageEditor({ file, previewUrl, onApply, onCancel, labels, }: ImageEditorProps): react_jsx_runtime.JSX.Element;
+
 interface UseSirvUploadOptions {
-    /** Endpoint to get presigned URLs (recommended) */
-    presignEndpoint?: string;
-    /** Full proxy endpoint (alternative) */
-    proxyEndpoint?: string;
+    /**
+     * Proxy endpoint URL for uploading files to Sirv.
+     * Your backend should forward the file to Sirv's REST API.
+     *
+     * The widget will POST to: {proxyEndpoint}/upload?filename=...&folder=...
+     * with the file binary in the request body.
+     *
+     * Expected response: { success: true, url: "...", path: "..." }
+     */
+    proxyEndpoint: string;
     /** Default upload folder */
     folder: string;
     /** Conflict resolution strategy */
@@ -750,6 +710,55 @@ declare function useGoogleDrivePicker({ clientId, apiKey, appId, onSelect, onCan
     clearSession: () => void;
 };
 
+type AspectRatio = 'free' | '1:1' | '4:3' | '3:4' | '16:9' | '9:16';
+interface CropArea {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
+interface EditorState {
+    rotation: 0 | 90 | 180 | 270;
+    flipH: boolean;
+    flipV: boolean;
+    crop: CropArea | null;
+    zoom: number;
+}
+interface UseImageEditorOptions {
+    file: File;
+    previewUrl: string;
+    onApply: (editedFile: File, previewUrl: string) => void;
+    onCancel: () => void;
+    maxCanvasSize?: number;
+}
+interface UseImageEditorReturn {
+    canvasRef: React.RefObject<HTMLCanvasElement | null>;
+    state: EditorState;
+    isLoading: boolean;
+    imageLoaded: boolean;
+    canvasSize: {
+        width: number;
+        height: number;
+    };
+    imageSize: {
+        width: number;
+        height: number;
+    };
+    hasChanges: boolean;
+    isApplying: boolean;
+    aspectRatio: AspectRatio;
+    rotateLeft: () => void;
+    rotateRight: () => void;
+    flipHorizontal: () => void;
+    flipVertical: () => void;
+    setCrop: (crop: CropArea | null) => void;
+    setAspectRatio: (ratio: AspectRatio) => void;
+    setZoom: (zoom: number) => void;
+    reset: () => void;
+    apply: () => Promise<void>;
+}
+declare function useImageEditor({ file, previewUrl, onApply, onCancel, maxCanvasSize, }: UseImageEditorOptions): UseImageEditorReturn;
+
 /**
  * File utility functions for the Sirv Upload Widget
  */
@@ -840,4 +849,4 @@ declare function parseExcelClient(arrayBuffer: ArrayBuffer, options?: ParseOptio
  */
 declare function isSpreadsheetFile(file: File): boolean;
 
-export { ACCEPTED_3D_FORMATS, ACCEPTED_ALL_FORMATS, ACCEPTED_IMAGE_FORMATS, ACCEPTED_VIDEO_FORMATS, type BrowseItem, type BrowseRequest, type BrowseResponse, type CheckRequest, type CheckResponse, type ClientParseResult, type ConflictInfo, type ConflictResolution, type CsvParseOptions, type CsvParseResult, DEFAULT_MAX_FILE_SIZE, type DeleteRequest, type DeleteResponse, DropZone, type DropZoneProps, type DropboxConfig, type DropboxFile, type FileCategory, FileList, type FileListProps, FileListSummary, FilePicker, type FilePickerProps, type GoogleDriveConfig, type GoogleDriveFile, type ImageDimensions, type ParsedUrl, type ParsedUrlItem, type PresignRequest, type PresignResponse, type SirvFile, SirvUploader, type SirvUploaderLabels, type SirvUploaderProps, SpreadsheetImport, type SpreadsheetImportProps, StagedFilesGrid, type StagedFilesGridProps, type UploadRequest, type UploadResponse, type UploadStatus, type UrlValidator, type UseDropboxChooserOptions, type UseFilePickerOptions, type UseFilePickerReturn, type UseGoogleDrivePickerOptions, type UseSirvUploadOptions$1 as UseSirvUploadOptions, type UseSirvUploadReturn$1 as UseSirvUploadReturn, canPreviewFile, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getFileCategory, getImageDimensions, getMimeType, is3DModelFile, isHeifFile, isImageFile, isPdfFile, isSpreadsheetFile, isSvgFile, isVideoFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useDropboxChooser, useGoogleDrivePicker, useSirvUpload, validateFileSize };
+export { ACCEPTED_3D_FORMATS, ACCEPTED_ALL_FORMATS, ACCEPTED_IMAGE_FORMATS, ACCEPTED_VIDEO_FORMATS, type AspectRatio, type BrowseItem, type BrowseRequest, type BrowseResponse, type CheckRequest, type CheckResponse, type ClientParseResult, type ConflictInfo, type ConflictResolution, type CropArea, type CsvParseOptions, type CsvParseResult, DEFAULT_MAX_FILE_SIZE, type DeleteRequest, type DeleteResponse, DropZone, type DropZoneProps, type DropboxConfig, type DropboxFile, type EditorState, type FileCategory, FileList, type FileListProps, FileListSummary, type GoogleDriveConfig, type GoogleDriveFile, type ImageDimensions, ImageEditor, type ImageEditorProps, type ParsedUrl, type ParsedUrlItem, type SirvFile, SirvUploader, type SirvUploaderLabels, type SirvUploaderProps, SpreadsheetImport, type SpreadsheetImportProps, StagedFilesGrid, type StagedFilesGridProps, type UploadRequest, type UploadResponse, type UploadStatus, type UrlValidator, type UseDropboxChooserOptions, type UseGoogleDrivePickerOptions, type UseImageEditorOptions, type UseImageEditorReturn, type UseSirvUploadOptions$1 as UseSirvUploadOptions, type UseSirvUploadReturn$1 as UseSirvUploadReturn, canPreviewFile, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getFileCategory, getImageDimensions, getMimeType, is3DModelFile, isHeifFile, isImageFile, isPdfFile, isSpreadsheetFile, isSvgFile, isVideoFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useDropboxChooser, useGoogleDrivePicker, useImageEditor, useSirvUpload, validateFileSize };

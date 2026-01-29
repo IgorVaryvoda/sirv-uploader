@@ -5,7 +5,7 @@ import type { SirvFile } from '../types'
 
 describe('useSirvUpload', () => {
   const defaultOptions = {
-    presignEndpoint: '/api/presign',
+    proxyEndpoint: 'http://localhost/api/sirv',
     folder: '/uploads',
     onConflict: 'rename' as const,
     concurrency: 3,
@@ -214,18 +214,15 @@ describe('useSirvUpload', () => {
   })
 
   it('should call onUpload callback on success', async () => {
-    const mockFetch = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({
-          uploadUrl: 'https://s3.sirv.com/presigned',
-          publicUrl: 'https://account.sirv.com/uploads/test.jpg',
-          path: '/uploads/test.jpg',
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-      })
+    // Proxy endpoint returns success directly
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        success: true,
+        url: 'https://account.sirv.com/uploads/test.jpg',
+        path: '/uploads/test.jpg',
+      }),
+    })
     vi.stubGlobal('fetch', mockFetch)
 
     const onUpload = vi.fn()

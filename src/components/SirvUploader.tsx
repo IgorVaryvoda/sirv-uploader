@@ -1,15 +1,16 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useMemo, memo } from 'react'
 import clsx from 'clsx'
 import { DropZone } from './DropZone'
 import { FileList, FileListSummary } from './FileList'
 import { StagedFilesGrid } from './StagedFilesGrid'
-import { FilePicker } from './FilePicker'
 import { SpreadsheetImport } from './SpreadsheetImport'
+import { UploadIcon, UrlIcon, DropboxIcon, GoogleDriveIcon } from './icons'
 import { useSirvUpload } from '../hooks/useSirvUpload'
 import { useDropboxChooser, type DropboxFile } from '../hooks/useDropboxChooser'
 import { useGoogleDrivePicker, type GoogleDriveFile } from '../hooks/useGoogleDrivePicker'
-import type { SirvUploaderProps, SirvFile, BrowseItem } from '../types'
-import { generateId, ACCEPTED_ALL_FORMATS } from '../utils/image-utils'
+import { useExternalImport } from '../hooks/useExternalImport'
+import type { SirvUploaderProps, SirvFile } from '../types'
+import { ACCEPTED_ALL_FORMATS } from '../utils/image-utils'
 
 type TabMode = 'upload' | 'urls' | 'dropbox' | 'gdrive'
 
@@ -42,35 +43,70 @@ const DEFAULT_LABELS = {
   filesSelected: 'files selected',
 }
 
-// Tab icons
-const UploadIcon = () => (
-  <svg className="sirv-uploader__tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
-  </svg>
-)
+// Memoized tab button to prevent unnecessary re-renders
+interface TabButtonProps {
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+}
 
-const UrlIcon = () => (
-  <svg className="sirv-uploader__tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-  </svg>
-)
+const TabButton = memo(function TabButton({ active, onClick, icon, label }: TabButtonProps) {
+  return (
+    <button
+      type="button"
+      className={clsx('sirv-tabs__tab', active && 'sirv-tabs__tab--active')}
+      onClick={onClick}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+})
 
-const DropboxIcon = () => (
-  <svg className="sirv-uploader__tab-icon" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M6 2l6 3.75L6 9.5 0 5.75 6 2zm12 0l6 3.75-6 3.75-6-3.75L18 2zM0 13.25L6 9.5l6 3.75L6 17 0 13.25zm18-3.75l6 3.75L18 17l-6-3.75 6-3.75zM6 18.25l6-3.75 6 3.75L12 22l-6-3.75z" />
-  </svg>
-)
+// Memoized external picker panel
+interface ExternalPickerPanelProps {
+  icon: React.ReactNode
+  title: string
+  description: string
+  buttonLabel: string
+  onOpen: () => void
+  disabled: boolean
+  isLoading: boolean
+  variant: 'dropbox' | 'gdrive'
+}
 
-const GoogleDriveIcon = () => (
-  <svg className="sirv-uploader__tab-icon" viewBox="0 0 24 24" fill="currentColor">
-    <path d="M7.71 3.5L1.15 15l3.43 5.93h13.68l3.44-5.93L15.14 3.5H7.71zm.79 1.5h5.95l5.14 9H8.08l-5.14-9h5.56z" />
-  </svg>
-)
+const ExternalPickerPanel = memo(function ExternalPickerPanel({
+  icon,
+  title,
+  description,
+  buttonLabel,
+  onOpen,
+  disabled,
+  isLoading,
+  variant,
+}: ExternalPickerPanelProps) {
+  return (
+    <div className="sirv-uploader__external-picker">
+      <div className={`sirv-uploader__external-icon sirv-uploader__external-icon--${variant}`}>
+        {icon}
+      </div>
+      <h3 className="sirv-uploader__external-title">{title}</h3>
+      <p className="sirv-uploader__external-description">{description}</p>
+      <button
+        type="button"
+        className={`sirv-btn sirv-btn--primary sirv-btn--${variant}`}
+        onClick={onOpen}
+        disabled={disabled || isLoading}
+      >
+        {isLoading ? 'Loading...' : buttonLabel}
+      </button>
+    </div>
+  )
+})
 
 export function SirvUploader({
-  presignEndpoint,
   proxyEndpoint,
-  sirvAccount,
   folder = '/',
   onUpload,
   onError,
@@ -92,32 +128,29 @@ export function SirvUploader({
   labels: customLabels = {},
   children,
 }: SirvUploaderProps) {
-  const labels = { ...DEFAULT_LABELS, ...customLabels }
+  // Memoize labels to prevent child re-renders
+  const labels = useMemo(() => ({ ...DEFAULT_LABELS, ...customLabels }), [customLabels])
+
   const {
     batch = true,
     csvImport = true,
-    filePicker = true,
     dragDrop = true,
     paste = true,
     allAssets = false,
+    imageEditor = true,
   } = features
 
   const [activeTab, setActiveTab] = useState<TabMode>('upload')
-  const [isPickerOpen, setIsPickerOpen] = useState(false)
   const [stagedFiles, setStagedFiles] = useState<SirvFile[]>([])
-  const [isImporting, setIsImporting] = useState(false)
-  const [importProgress, setImportProgress] = useState({ current: 0, total: 0, source: '' })
 
-  // Determine if we should show staged mode (when autoUpload is false)
-  const showStagedMode = !autoUpload && stagedFiles.length > 0
-
-  // Validate configuration
-  if (!presignEndpoint && !proxyEndpoint) {
-    console.warn('SirvUploader: Either presignEndpoint or proxyEndpoint must be provided')
-  }
+  // Validate configuration (only warn once)
+  useMemo(() => {
+    if (!proxyEndpoint) {
+      console.warn('SirvUploader: proxyEndpoint is required')
+    }
+  }, [proxyEndpoint])
 
   const upload = useSirvUpload({
-    presignEndpoint,
     proxyEndpoint,
     folder,
     onConflict,
@@ -128,18 +161,33 @@ export function SirvUploader({
     onError,
   })
 
-  // Handle files from DropZone
+  // Memoize computed values
+  const showStagedMode = !autoUpload && stagedFiles.length > 0
+  const hasFiles = showStagedMode ? stagedFiles.length > 0 : upload.files.length > 0
+  const hasPendingFiles = useMemo(() => {
+    const files = showStagedMode ? stagedFiles : upload.files
+    return files.some((f) => f.status === 'pending' || f.status === 'error')
+  }, [showStagedMode, stagedFiles, upload.files])
+
+  const acceptString = useMemo(
+    () => (allAssets ? ACCEPTED_ALL_FORMATS : accept.join(',')),
+    [allAssets, accept]
+  )
+
+  const themeClass = useMemo(
+    () => (theme === 'dark' ? 'sirv-uploader--dark' : theme === 'light' ? 'sirv-uploader--light' : undefined),
+    [theme]
+  )
+
+  // Handler for files from any source
   const handleFiles = useCallback(
     (files: SirvFile[]) => {
       if (autoUpload) {
         upload.addFiles(files)
         onSelect?.(files)
       } else {
-        // Stage files for review before upload
         setStagedFiles((prev) => {
-          const newFiles = files.filter(
-            (f) => !prev.some((p) => p.id === f.id)
-          )
+          const newFiles = files.filter((f) => !prev.some((p) => p.id === f.id))
           return [...prev, ...newFiles].slice(0, maxFiles)
         })
         onSelect?.(files)
@@ -148,97 +196,38 @@ export function SirvUploader({
     [upload, onSelect, autoUpload, maxFiles]
   )
 
+  // External import hook (shared logic for URLs, Dropbox, Google Drive)
+  const externalImport = useExternalImport({
+    maxFiles,
+    onComplete: useCallback(
+      (files: SirvFile[]) => {
+        handleFiles(files)
+        setActiveTab('upload')
+      },
+      [handleFiles]
+    ),
+  })
+
   // Handle spreadsheet file
   const handleSpreadsheet = useCallback(() => {
     setActiveTab('urls')
   }, [])
 
-  // Download external file and create a staged SirvFile
-  const downloadAndStageFile = useCallback(async (
-    url: string,
-    filename: string,
-    accessToken?: string
-  ): Promise<SirvFile | null> => {
-    try {
-      const headers: HeadersInit = {}
-      if (accessToken) {
-        headers.Authorization = `Bearer ${accessToken}`
-      }
-      const response = await fetch(url, { headers })
-      if (!response.ok) throw new Error('Download failed')
-      const blob = await response.blob()
-      const file = new File([blob], filename, { type: blob.type || 'image/png' })
-      return {
-        id: generateId(),
-        file,
-        filename,
-        previewUrl: URL.createObjectURL(blob),
-        size: blob.size,
-        status: 'pending' as const,
-        progress: 0,
-      }
-    } catch (err) {
-      console.error(`Failed to download ${filename}:`, err)
-      return null
-    }
-  }, [])
-
-  // Handle URLs from spreadsheet - download and stage files
+  // Handle URLs from spreadsheet
   const handleUrls = useCallback(
     async (urls: string[]) => {
-      const validUrls = urls.slice(0, maxFiles)
-      if (validUrls.length === 0) return
-
-      setIsImporting(true)
-      setImportProgress({ current: 0, total: validUrls.length, source: 'URLs' })
-
-      const newFiles: SirvFile[] = []
-      for (let i = 0; i < validUrls.length; i++) {
-        const url = validUrls[i]
-        setImportProgress({ current: i + 1, total: validUrls.length, source: 'URLs' })
-        const filename = url.split('/').pop()?.split('?')[0] || `image-${i + 1}.png`
-        const staged = await downloadAndStageFile(url, filename)
-        if (staged) newFiles.push(staged)
-      }
-
-      setIsImporting(false)
-      setImportProgress({ current: 0, total: 0, source: '' })
-
-      if (newFiles.length > 0) {
-        handleFiles(newFiles)
-        setActiveTab('upload')
-      }
+      await externalImport.importFiles(
+        urls.map((url) => ({
+          url,
+          name: url.split('/').pop()?.split('?')[0] || 'image.png',
+        })),
+        'URLs'
+      )
     },
-    [maxFiles, downloadAndStageFile, handleFiles]
+    [externalImport]
   )
 
-  // Handle file picker selection - download and stage for consistency
-  const handlePickerSelect = useCallback(
-    async (items: BrowseItem[]) => {
-      setIsPickerOpen(false)
-      setIsImporting(true)
-      setImportProgress({ current: 0, total: items.length, source: 'Sirv' })
-
-      const newFiles: SirvFile[] = []
-      for (let i = 0; i < items.slice(0, maxFiles).length; i++) {
-        const item = items[i]
-        setImportProgress({ current: i + 1, total: items.length, source: 'Sirv' })
-        const url = `https://${sirvAccount}.sirv.com${item.path}`
-        const staged = await downloadAndStageFile(url, item.name)
-        if (staged) newFiles.push(staged)
-      }
-
-      setIsImporting(false)
-      setImportProgress({ current: 0, total: 0, source: '' })
-
-      if (newFiles.length > 0) {
-        handleFiles(newFiles)
-      }
-    },
-    [sirvAccount, maxFiles, downloadAndStageFile, handleFiles]
-  )
-
-  // Handle file removal (both staged and uploaded)
+  // Handle file removal
   const handleRemove = useCallback(
     (id: string) => {
       if (showStagedMode) {
@@ -252,11 +241,24 @@ export function SirvUploader({
     [upload, onRemove, showStagedMode]
   )
 
-  // Handle staged file edit (placeholder - implement as needed)
+  // Handle file edit (legacy callback)
   const handleEdit = useCallback((file: SirvFile) => {
     console.log('Edit file:', file.filename)
-    // Implement image editor integration here
   }, [])
+
+  // Handle file edited via built-in editor
+  const handleFileEdited = useCallback(
+    (id: string, editedFile: File, previewUrl: string) => {
+      setStagedFiles((prev) =>
+        prev.map((f) =>
+          f.id === id
+            ? { ...f, file: editedFile, filename: editedFile.name, previewUrl, size: editedFile.size }
+            : f
+        )
+      )
+    },
+    []
+  )
 
   // Handle add more files in staged mode
   const handleAddMore = useCallback(
@@ -272,7 +274,7 @@ export function SirvUploader({
     setStagedFiles([])
   }, [upload, stagedFiles])
 
-  // Handle clear all staged files
+  // Handle clear all
   const handleClearAll = useCallback(() => {
     if (showStagedMode) {
       setStagedFiles([])
@@ -281,116 +283,110 @@ export function SirvUploader({
     }
   }, [upload, showStagedMode])
 
-  // Dropbox integration - download and stage files
+  // Dropbox integration
   const dropboxChooser = useDropboxChooser({
     appKey: dropbox?.appKey || '',
-    onSelect: async (files: DropboxFile[]) => {
-      setIsImporting(true)
-      setImportProgress({ current: 0, total: files.length, source: 'Dropbox' })
-
-      const newFiles: SirvFile[] = []
-      for (let i = 0; i < files.slice(0, maxFiles).length; i++) {
-        const f = files[i]
-        setImportProgress({ current: i + 1, total: files.length, source: 'Dropbox' })
-        const staged = await downloadAndStageFile(f.link, f.name)
-        if (staged) newFiles.push(staged)
-      }
-
-      setIsImporting(false)
-      setImportProgress({ current: 0, total: 0, source: '' })
-
-      if (newFiles.length > 0) {
-        handleFiles(newFiles)
-        setActiveTab('upload')
-      }
-    },
+    onSelect: useCallback(
+      async (files: DropboxFile[]) => {
+        await externalImport.importFiles(
+          files.map((f) => ({ url: f.link, name: f.name })),
+          'Dropbox'
+        )
+      },
+      [externalImport]
+    ),
   })
 
-  // Google Drive integration - download and stage files
+  // Google Drive integration
   const googleDrivePicker = useGoogleDrivePicker({
     clientId: googleDrive?.clientId || '',
     apiKey: googleDrive?.apiKey || '',
     appId: googleDrive?.appId || '',
-    onSelect: async (files: GoogleDriveFile[], accessToken: string) => {
-      setIsImporting(true)
-      setImportProgress({ current: 0, total: files.length, source: 'Google Drive' })
-
-      const newFiles: SirvFile[] = []
-      for (let i = 0; i < files.slice(0, maxFiles).length; i++) {
-        const f = files[i]
-        setImportProgress({ current: i + 1, total: files.length, source: 'Google Drive' })
-        const downloadUrl = `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`
-        const staged = await downloadAndStageFile(downloadUrl, f.name, accessToken)
-        if (staged) newFiles.push(staged)
-      }
-
-      setIsImporting(false)
-      setImportProgress({ current: 0, total: 0, source: '' })
-
-      if (newFiles.length > 0) {
-        handleFiles(newFiles)
-        setActiveTab('upload')
-      }
-    },
+    onSelect: useCallback(
+      async (files: GoogleDriveFile[], accessToken: string) => {
+        await externalImport.importFiles(
+          files.map((f) => ({
+            url: `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,
+            name: f.name,
+            accessToken,
+          })),
+          'Google Drive'
+        )
+      },
+      [externalImport]
+    ),
   })
 
   const hasDropbox = !!dropbox?.appKey && dropboxChooser.isConfigured
   const hasGoogleDrive = !!googleDrive && googleDrivePicker.isConfigured
-  const hasFiles = showStagedMode ? stagedFiles.length > 0 : upload.files.length > 0
-  const hasPendingFiles = showStagedMode
-    ? stagedFiles.some((f) => f.status === 'pending' || f.status === 'error')
-    : upload.files.some((f) => f.status === 'pending' || f.status === 'error')
   const showTabs = csvImport || hasDropbox || hasGoogleDrive
 
-  // Determine browse endpoint
-  const browseEndpoint = proxyEndpoint || (presignEndpoint ? presignEndpoint.replace(/\/presign$/, '') : '')
+  // Memoize label subsets for child components
+  const dropzoneLabels = useMemo(
+    () => ({
+      dropzone: labels.dropzone,
+      dropzoneHint: labels.dropzoneHint,
+      browse: labels.browse,
+      pasteHint: labels.pasteHint,
+    }),
+    [labels]
+  )
 
-  const themeClass = theme === 'dark' ? 'sirv-uploader--dark' : theme === 'light' ? 'sirv-uploader--light' : undefined
+  const stagedGridLabels = useMemo(
+    () => ({
+      addMore: labels.addMore,
+      edit: labels.edit,
+      remove: labels.remove,
+    }),
+    [labels]
+  )
 
-  const acceptString = allAssets ? ACCEPTED_ALL_FORMATS : accept.join(',')
+  const fileListLabels = useMemo(
+    () => ({
+      retry: labels.retry,
+      remove: labels.remove,
+      uploading: labels.uploading,
+      processing: labels.processing,
+      success: labels.success,
+      error: labels.error,
+    }),
+    [labels]
+  )
 
   return (
     <div className={clsx('sirv-uploader', themeClass, className)}>
       {/* Tabs */}
       {showTabs && (
         <div className="sirv-tabs">
-          <button
-            type="button"
-            className={clsx('sirv-tabs__tab', activeTab === 'upload' && 'sirv-tabs__tab--active')}
+          <TabButton
+            active={activeTab === 'upload'}
             onClick={() => setActiveTab('upload')}
-          >
-            <UploadIcon />
-            {labels.uploadFiles}
-          </button>
+            icon={<UploadIcon />}
+            label={labels.uploadFiles}
+          />
           {csvImport && (
-            <button
-              type="button"
-              className={clsx('sirv-tabs__tab', activeTab === 'urls' && 'sirv-tabs__tab--active')}
+            <TabButton
+              active={activeTab === 'urls'}
               onClick={() => setActiveTab('urls')}
-            >
-              <UrlIcon />
-              {labels.importUrls}
-            </button>
+              icon={<UrlIcon />}
+              label={labels.importUrls}
+            />
           )}
           {hasDropbox && (
-            <button
-              type="button"
-              className={clsx('sirv-tabs__tab', activeTab === 'dropbox' && 'sirv-tabs__tab--active')}
+            <TabButton
+              active={activeTab === 'dropbox'}
               onClick={() => setActiveTab('dropbox')}
-            >
-              <DropboxIcon />
-              {labels.importFromDropbox}
-            </button>
+              icon={<DropboxIcon />}
+              label={labels.importFromDropbox}
+            />
           )}
           {hasGoogleDrive && (
-            <button
-              type="button"
-              className={clsx('sirv-tabs__tab', activeTab === 'gdrive' && 'sirv-tabs__tab--active')}
+            <TabButton
+              active={activeTab === 'gdrive'}
               onClick={() => setActiveTab('gdrive')}
-            >
-              <GoogleDriveIcon />
-              {labels.importFromGoogleDrive}
-            </button>
+              icon={<GoogleDriveIcon />}
+              label={labels.importFromGoogleDrive}
+            />
           )}
         </div>
       )}
@@ -403,15 +399,13 @@ export function SirvUploader({
               files={stagedFiles}
               onRemove={handleRemove}
               onEdit={handleEdit}
+              onFileEdited={handleFileEdited}
               onAddMore={handleAddMore}
               maxFiles={maxFiles}
               accept={acceptString}
               disabled={disabled}
-              labels={{
-                addMore: labels.addMore,
-                edit: labels.edit,
-                remove: labels.remove,
-              }}
+              enableEditor={imageEditor}
+              labels={stagedGridLabels}
             />
           ) : (
             <>
@@ -426,31 +420,18 @@ export function SirvUploader({
                   compact={compact}
                   enablePaste={paste}
                   acceptAllAssets={allAssets}
-                  labels={{
-                    dropzone: labels.dropzone,
-                    dropzoneHint: labels.dropzoneHint,
-                    browse: labels.browse,
-                    pasteHint: labels.pasteHint,
-                  }}
+                  labels={dropzoneLabels}
                 >
                   {children}
                 </DropZone>
               )}
 
-              {/* File List (auto-upload mode) */}
               {hasFiles && autoUpload && (
                 <FileList
                   files={upload.files}
                   onRemove={handleRemove}
                   onRetry={upload.retryFile}
-                  labels={{
-                    retry: labels.retry,
-                    remove: labels.remove,
-                    uploading: labels.uploading,
-                    processing: labels.processing,
-                    success: labels.success,
-                    error: labels.error,
-                  }}
+                  labels={fileListLabels}
                 />
               )}
             </>
@@ -464,95 +445,63 @@ export function SirvUploader({
       )}
 
       {/* Import Progress Overlay */}
-      {isImporting && (
+      {externalImport.isImporting && (
         <div className="sirv-uploader__import-progress">
           <div className="sirv-uploader__import-spinner" />
           <p className="sirv-uploader__import-text">
-            Importing from {importProgress.source}...
+            Importing from {externalImport.progress.source}...
           </p>
           <p className="sirv-uploader__import-count">
-            {importProgress.current} / {importProgress.total}
+            {externalImport.progress.current} / {externalImport.progress.total}
           </p>
         </div>
       )}
 
       {/* Dropbox Tab */}
-      {activeTab === 'dropbox' && hasDropbox && !isImporting && (
-        <div className="sirv-uploader__external-picker">
-          <div className="sirv-uploader__external-icon sirv-uploader__external-icon--dropbox">
-            <DropboxIcon />
-          </div>
-          <h3 className="sirv-uploader__external-title">Import from Dropbox</h3>
-          <p className="sirv-uploader__external-description">
-            Select files from your Dropbox account
-          </p>
-          <button
-            type="button"
-            className="sirv-btn sirv-btn--primary sirv-btn--dropbox"
-            onClick={dropboxChooser.openChooser}
-            disabled={disabled || dropboxChooser.isLoading}
-          >
-            {dropboxChooser.isLoading ? labels.uploading : 'Open Dropbox'}
-          </button>
-        </div>
+      {activeTab === 'dropbox' && hasDropbox && !externalImport.isImporting && (
+        <ExternalPickerPanel
+          icon={<DropboxIcon />}
+          title="Import from Dropbox"
+          description="Select files from your Dropbox account"
+          buttonLabel="Open Dropbox"
+          onOpen={dropboxChooser.openChooser}
+          disabled={disabled}
+          isLoading={dropboxChooser.isLoading}
+          variant="dropbox"
+        />
       )}
 
       {/* Google Drive Tab */}
-      {activeTab === 'gdrive' && hasGoogleDrive && !isImporting && (
-        <div className="sirv-uploader__external-picker">
-          <div className="sirv-uploader__external-icon sirv-uploader__external-icon--gdrive">
-            <GoogleDriveIcon />
-          </div>
-          <h3 className="sirv-uploader__external-title">Import from Google Drive</h3>
-          <p className="sirv-uploader__external-description">
-            Select files from your Google Drive
-          </p>
-          <button
-            type="button"
-            className="sirv-btn sirv-btn--primary sirv-btn--gdrive"
-            onClick={googleDrivePicker.openPicker}
-            disabled={disabled || googleDrivePicker.isLoading}
-          >
-            {googleDrivePicker.isLoading ? labels.uploading : 'Open Google Drive'}
-          </button>
-        </div>
+      {activeTab === 'gdrive' && hasGoogleDrive && !externalImport.isImporting && (
+        <ExternalPickerPanel
+          icon={<GoogleDriveIcon />}
+          title="Import from Google Drive"
+          description="Select files from your Google Drive"
+          buttonLabel="Open Google Drive"
+          onOpen={googleDrivePicker.openPicker}
+          disabled={disabled}
+          isLoading={googleDrivePicker.isLoading}
+          variant="gdrive"
+        />
       )}
 
       {/* Toolbar */}
-      {(hasFiles || filePicker) && activeTab === 'upload' && (
+      {hasFiles && activeTab === 'upload' && (
         <div className="sirv-uploader__toolbar">
-          <div className="sirv-uploader__toolbar-left">
-            {filePicker && browseEndpoint && (
-              <button
-                type="button"
-                className="sirv-btn"
-                onClick={() => setIsPickerOpen(true)}
-                disabled={disabled}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                </svg>
-                {labels.selectFromSirv}
-              </button>
-            )}
-          </div>
+          <div className="sirv-uploader__toolbar-left" />
 
           <div className="sirv-uploader__toolbar-right">
-            {hasFiles && (
-              <>
-                <span className="sirv-uploader__file-count">
-                  {showStagedMode ? stagedFiles.length : upload.files.length} {labels.filesSelected}
-                </span>
-                <button
-                  type="button"
-                  className="sirv-btn"
-                  onClick={handleClearAll}
-                  disabled={disabled || upload.isUploading}
-                >
-                  {labels.clearAll}
-                </button>
-              </>
-            )}
+            <span className="sirv-uploader__file-count">
+              {showStagedMode ? stagedFiles.length : upload.files.length} {labels.filesSelected}
+            </span>
+            <button
+              type="button"
+              className="sirv-btn"
+              onClick={handleClearAll}
+              disabled={disabled || upload.isUploading}
+            >
+              {labels.clearAll}
+            </button>
             {showStagedMode && hasPendingFiles && (
               <button
                 type="button"
@@ -580,22 +529,6 @@ export function SirvUploader({
 
       {/* Summary */}
       {hasFiles && autoUpload && <FileListSummary files={upload.files} />}
-
-      {/* File Picker Modal */}
-      {filePicker && browseEndpoint && (
-        <FilePicker
-          endpoint={browseEndpoint}
-          isOpen={isPickerOpen}
-          onClose={() => setIsPickerOpen(false)}
-          onSelect={handlePickerSelect}
-          multiple={batch}
-          initialPath={folder}
-          labels={{
-            title: labels.selectFromSirv,
-            cancel: labels.cancel,
-          }}
-        />
-      )}
     </div>
   )
 }

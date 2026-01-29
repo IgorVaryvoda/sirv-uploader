@@ -4,15 +4,20 @@ import type {
   SirvFile,
   UploadStatus,
   ConflictResolution,
-  PresignResponse,
   UploadResponse,
 } from '../types'
 
 export interface UseSirvUploadOptions {
-  /** Endpoint to get presigned URLs (recommended) */
-  presignEndpoint?: string
-  /** Full proxy endpoint (alternative) */
-  proxyEndpoint?: string
+  /**
+   * Proxy endpoint URL for uploading files to Sirv.
+   * Your backend should forward the file to Sirv's REST API.
+   *
+   * The widget will POST to: {proxyEndpoint}/upload?filename=...&folder=...
+   * with the file binary in the request body.
+   *
+   * Expected response: { success: true, url: "...", path: "..." }
+   */
+  proxyEndpoint: string
   /** Default upload folder */
   folder: string
   /** Conflict resolution strategy */
@@ -46,7 +51,6 @@ export interface UseSirvUploadReturn {
 
 export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadReturn {
   const {
-    presignEndpoint,
     proxyEndpoint,
     folder,
     onConflict,
@@ -68,62 +72,7 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
     )
   }, [])
 
-  // Upload using presigned URL (direct to Sirv S3)
-  const uploadWithPresign = useCallback(
-    async (file: SirvFile, signal: AbortSignal): Promise<void> => {
-      if (!presignEndpoint) throw new Error('No presign endpoint configured')
-      if (!file.file) throw new Error('No file data')
-
-      // 1. Get presigned URL from user's backend
-      const presignRes = await fetch(presignEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: file.filename,
-          contentType: getMimeType(file.file),
-          folder,
-          size: file.file.size,
-        }),
-        signal,
-      })
-
-      if (!presignRes.ok) {
-        const err = await presignRes.json().catch(() => ({}))
-        throw new Error(err.error || `Failed to get upload URL: ${presignRes.status}`)
-      }
-
-      const { uploadUrl, publicUrl, path, error }: PresignResponse = await presignRes.json()
-      if (error) throw new Error(error)
-      if (!uploadUrl) throw new Error('No upload URL returned')
-
-      // 2. Upload directly to Sirv S3
-      updateFile(file.id, { status: 'uploading', progress: 10 })
-
-      const uploadRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        body: file.file,
-        headers: {
-          'Content-Type': getMimeType(file.file),
-        },
-        signal,
-      })
-
-      if (!uploadRes.ok) {
-        throw new Error(`Upload failed: ${uploadRes.status}`)
-      }
-
-      // 3. Success
-      updateFile(file.id, {
-        status: 'success',
-        progress: 100,
-        sirvUrl: publicUrl,
-        sirvPath: path,
-      })
-    },
-    [presignEndpoint, folder, updateFile]
-  )
-
-  // Upload using proxy (file data goes through user's server)
+  // Upload file through proxy endpoint to Sirv REST API
   const uploadWithProxy = useCallback(
     async (file: SirvFile, signal: AbortSignal): Promise<void> => {
       if (!proxyEndpoint) throw new Error('No proxy endpoint configured')
@@ -132,7 +81,11 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
       updateFile(file.id, { status: 'uploading', progress: 10 })
 
       // Build upload URL with query params
-      const uploadUrl = new URL(`${proxyEndpoint}/upload`)
+      // Handle both absolute URLs (https://...) and relative paths (/api/...)
+      const baseUrl = proxyEndpoint.startsWith('http')
+        ? proxyEndpoint
+        : `${typeof window !== 'undefined' ? window.location.origin : ''}${proxyEndpoint}`
+      const uploadUrl = new URL(`${baseUrl}/upload`)
       uploadUrl.searchParams.set('filename', file.filename)
       uploadUrl.searchParams.set('folder', folder)
 
@@ -180,13 +133,7 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
       try {
         updateFile(id, { status: 'uploading', progress: 0, error: undefined })
 
-        if (presignEndpoint) {
-          await uploadWithPresign(file, controller.signal)
-        } else if (proxyEndpoint) {
-          await uploadWithProxy(file, controller.signal)
-        } else {
-          throw new Error('No upload endpoint configured')
-        }
+        await uploadWithProxy(file, controller.signal)
 
         // Notify success
         const updatedFile = files.find((f) => f.id === id)
@@ -208,7 +155,7 @@ export function useSirvUpload(options: UseSirvUploadOptions): UseSirvUploadRetur
         processQueue()
       }
     },
-    [files, presignEndpoint, proxyEndpoint, uploadWithPresign, uploadWithProxy, updateFile, onUpload, onError]
+    [files, proxyEndpoint, uploadWithProxy, updateFile, onUpload, onError]
   )
 
   // Process upload queue with concurrency limit

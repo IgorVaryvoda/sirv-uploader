@@ -9,13 +9,14 @@ export { SirvUploader } from './components/SirvUploader'
 export { DropZone } from './components/DropZone'
 export { FileList, FileListSummary } from './components/FileList'
 export { StagedFilesGrid } from './components/StagedFilesGrid'
-export { FilePicker } from './components/FilePicker'
 export { SpreadsheetImport } from './components/SpreadsheetImport'
+export { ImageEditor } from './components/ImageEditor'
 
 // Hooks
 export { useSirvUpload } from './hooks/useSirvUpload'
 export { useDropboxChooser } from './hooks/useDropboxChooser'
 export { useGoogleDrivePicker } from './hooks/useGoogleDrivePicker'
+export { useImageEditor } from './hooks/useImageEditor'
 
 // Utilities
 export {
@@ -59,11 +60,7 @@ export type {
   ConflictResolution,
   ConflictInfo,
 
-  // Presigned URL mode (recommended)
-  PresignRequest,
-  PresignResponse,
-
-  // Proxy mode
+  // Proxy upload types
   UploadRequest,
   UploadResponse,
   BrowseRequest,
@@ -83,8 +80,6 @@ export type {
   // Hook types
   UseSirvUploadOptions,
   UseSirvUploadReturn,
-  UseFilePickerOptions,
-  UseFilePickerReturn,
 
   // Utility types
   ParsedUrl,
@@ -95,8 +90,15 @@ export type {
 export type { DropZoneProps } from './components/DropZone'
 export type { FileListProps } from './components/FileList'
 export type { StagedFilesGridProps } from './components/StagedFilesGrid'
-export type { FilePickerProps } from './components/FilePicker'
 export type { SpreadsheetImportProps } from './components/SpreadsheetImport'
+export type { ImageEditorProps } from './components/ImageEditor'
+export type {
+  AspectRatio,
+  CropArea,
+  EditorState,
+  UseImageEditorOptions,
+  UseImageEditorReturn,
+} from './hooks/useImageEditor'
 export type { DropboxFile, UseDropboxChooserOptions } from './hooks/useDropboxChooser'
 export type { GoogleDriveFile, UseGoogleDrivePickerOptions } from './hooks/useGoogleDrivePicker'
 export type { ClientParseResult, ParsedUrlItem, UrlValidator } from './utils/csv-parser'

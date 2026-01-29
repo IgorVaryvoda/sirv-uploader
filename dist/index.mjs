@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
-import clsx6 from 'clsx';
+import { memo, useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import clsx3 from 'clsx';
 import { jsxs, jsx, Fragment } from 'react/jsx-runtime';
 
 // src/components/SirvUploader.tsx
@@ -753,7 +753,7 @@ function DropZone({
     "div",
     {
       ref: containerRef,
-      className: clsx6(
+      className: clsx3(
         "sirv-dropzone",
         isDragOver && "sirv-dropzone--drag-over",
         disabled && "sirv-dropzone--disabled",
@@ -831,7 +831,7 @@ function FileList({
   labels = {}
 }) {
   if (files.length === 0) return null;
-  return /* @__PURE__ */ jsx("div", { className: clsx6("sirv-filelist", className), children: files.map((file) => /* @__PURE__ */ jsx(
+  return /* @__PURE__ */ jsx("div", { className: clsx3("sirv-filelist", className), children: files.map((file) => /* @__PURE__ */ jsx(
     FileItem,
     {
       file,
@@ -855,7 +855,7 @@ function FileItem({ file, onRemove, onRetry, showThumbnail, labels = {} }) {
   return /* @__PURE__ */ jsxs(
     "div",
     {
-      className: clsx6(
+      className: clsx3(
         "sirv-filelist__item",
         `sirv-filelist__item--${file.status}`,
         file.error && "sirv-filelist__item--has-error"
@@ -923,7 +923,7 @@ function FileListSummary({ files, className }) {
   const success = files.filter((f) => f.status === "success").length;
   const error = files.filter((f) => f.status === "error").length;
   if (files.length === 0) return null;
-  return /* @__PURE__ */ jsxs("div", { className: clsx6("sirv-filelist-summary", className), children: [
+  return /* @__PURE__ */ jsxs("div", { className: clsx3("sirv-filelist-summary", className), children: [
     /* @__PURE__ */ jsxs("span", { className: "sirv-filelist-summary__total", children: [
       files.length,
       " files"
@@ -946,14 +946,640 @@ function FileListSummary({ files, className }) {
     ] })
   ] });
 }
+var DEFAULT_STATE = {
+  rotation: 0,
+  flipH: false,
+  flipV: false,
+  crop: null,
+  zoom: 1
+};
+var MAX_CANVAS_SIZE = 800;
+function useImageEditor({
+  file,
+  previewUrl,
+  onApply,
+  onCancel,
+  maxCanvasSize = MAX_CANVAS_SIZE
+}) {
+  const canvasRef = useRef(null);
+  const imageRef = useRef(null);
+  const [state, setState] = useState(DEFAULT_STATE);
+  const [isLoading, setIsLoading] = useState(true);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [aspectRatio, setAspectRatio] = useState("free");
+  const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      imageRef.current = img;
+      setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+      const scale = Math.min(
+        maxCanvasSize / img.naturalWidth,
+        maxCanvasSize / img.naturalHeight,
+        1
+      );
+      setCanvasSize({
+        width: Math.round(img.naturalWidth * scale),
+        height: Math.round(img.naturalHeight * scale)
+      });
+      setImageLoaded(true);
+      setIsLoading(false);
+    };
+    img.onerror = () => {
+      setIsLoading(false);
+      console.error("Failed to load image for editing");
+    };
+    img.src = previewUrl;
+  }, [previewUrl, maxCanvasSize]);
+  useEffect(() => {
+    if (!imageLoaded || !canvasRef.current || !imageRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const img = imageRef.current;
+    const isRotated90or270 = state.rotation === 90 || state.rotation === 270;
+    let canvasWidth = canvasSize.width;
+    let canvasHeight = canvasSize.height;
+    if (isRotated90or270) {
+      const scale = Math.min(
+        maxCanvasSize / img.naturalHeight,
+        maxCanvasSize / img.naturalWidth,
+        1
+      );
+      canvasWidth = Math.round(img.naturalHeight * scale);
+      canvasHeight = Math.round(img.naturalWidth * scale);
+    }
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate(state.rotation * Math.PI / 180);
+    ctx.scale(state.flipH ? -1 : 1, state.flipV ? -1 : 1);
+    const drawWidth = isRotated90or270 ? canvasHeight : canvasWidth;
+    const drawHeight = isRotated90or270 ? canvasWidth : canvasHeight;
+    ctx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+    ctx.restore();
+  }, [state, imageLoaded, canvasSize, maxCanvasSize]);
+  const hasChanges = state.rotation !== 0 || state.flipH || state.flipV || state.crop !== null || state.zoom !== 1;
+  const rotateLeft = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      rotation: (prev.rotation - 90 + 360) % 360
+    }));
+  }, []);
+  const rotateRight = useCallback(() => {
+    setState((prev) => ({
+      ...prev,
+      rotation: (prev.rotation + 90) % 360
+    }));
+  }, []);
+  const flipHorizontal = useCallback(() => {
+    setState((prev) => ({ ...prev, flipH: !prev.flipH }));
+  }, []);
+  const flipVertical = useCallback(() => {
+    setState((prev) => ({ ...prev, flipV: !prev.flipV }));
+  }, []);
+  const setCrop = useCallback((crop) => {
+    setState((prev) => ({ ...prev, crop }));
+  }, []);
+  const setZoom = useCallback((zoom) => {
+    setState((prev) => ({ ...prev, zoom: Math.max(1, Math.min(5, zoom)) }));
+  }, []);
+  const reset = useCallback(() => {
+    setState(DEFAULT_STATE);
+    setAspectRatio("free");
+  }, []);
+  const apply = useCallback(async () => {
+    if (!imageRef.current) return;
+    setIsApplying(true);
+    try {
+      const img = imageRef.current;
+      const outputCanvas = document.createElement("canvas");
+      const outputCtx = outputCanvas.getContext("2d");
+      if (!outputCtx) throw new Error("Failed to get canvas context");
+      const isRotated90or270 = state.rotation === 90 || state.rotation === 270;
+      let outputWidth = isRotated90or270 ? img.naturalHeight : img.naturalWidth;
+      let outputHeight = isRotated90or270 ? img.naturalWidth : img.naturalHeight;
+      let cropX = 0, cropY = 0, cropWidth = outputWidth, cropHeight = outputHeight;
+      if (state.crop) {
+        cropX = Math.round(state.crop.x * outputWidth);
+        cropY = Math.round(state.crop.y * outputHeight);
+        cropWidth = Math.round(state.crop.width * outputWidth);
+        cropHeight = Math.round(state.crop.height * outputHeight);
+        outputWidth = cropWidth;
+        outputHeight = cropHeight;
+      }
+      outputCanvas.width = outputWidth;
+      outputCanvas.height = outputHeight;
+      const tempCanvas = document.createElement("canvas");
+      const tempCtx = tempCanvas.getContext("2d");
+      if (!tempCtx) throw new Error("Failed to get temp canvas context");
+      const tempWidth = isRotated90or270 ? img.naturalHeight : img.naturalWidth;
+      const tempHeight = isRotated90or270 ? img.naturalWidth : img.naturalHeight;
+      tempCanvas.width = tempWidth;
+      tempCanvas.height = tempHeight;
+      tempCtx.save();
+      tempCtx.translate(tempWidth / 2, tempHeight / 2);
+      tempCtx.rotate(state.rotation * Math.PI / 180);
+      tempCtx.scale(state.flipH ? -1 : 1, state.flipV ? -1 : 1);
+      const drawWidth = isRotated90or270 ? tempHeight : tempWidth;
+      const drawHeight = isRotated90or270 ? tempWidth : tempHeight;
+      tempCtx.drawImage(img, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+      tempCtx.restore();
+      if (state.crop) {
+        outputCtx.drawImage(
+          tempCanvas,
+          cropX,
+          cropY,
+          cropWidth,
+          cropHeight,
+          0,
+          0,
+          outputWidth,
+          outputHeight
+        );
+      } else {
+        outputCtx.drawImage(tempCanvas, 0, 0);
+      }
+      const blob = await new Promise((resolve, reject) => {
+        outputCanvas.toBlob(
+          (blob2) => {
+            if (blob2) resolve(blob2);
+            else reject(new Error("Failed to create blob"));
+          },
+          file.type || "image/png",
+          0.92
+        );
+      });
+      const editedFile = new File([blob], file.name, {
+        type: file.type || "image/png",
+        lastModified: Date.now()
+      });
+      const editedPreviewUrl = URL.createObjectURL(blob);
+      onApply(editedFile, editedPreviewUrl);
+    } catch (error) {
+      console.error("Failed to apply edits:", error);
+    } finally {
+      setIsApplying(false);
+    }
+  }, [state, file, onApply]);
+  return {
+    canvasRef,
+    state,
+    isLoading,
+    imageLoaded,
+    canvasSize,
+    imageSize,
+    hasChanges,
+    isApplying,
+    aspectRatio,
+    rotateLeft,
+    rotateRight,
+    flipHorizontal,
+    flipVertical,
+    setCrop,
+    setAspectRatio,
+    setZoom,
+    reset,
+    apply
+  };
+}
+var UploadIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" }) });
+var UrlIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" }) });
+var DropboxIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsx("path", { d: "M6 2l6 3.75L6 9.5 0 5.75 6 2zm12 0l6 3.75-6 3.75-6-3.75L18 2zM0 13.25L6 9.5l6 3.75L6 17 0 13.25zm18-3.75l6 3.75L18 17l-6-3.75 6-3.75zM6 18.25l6-3.75 6 3.75L12 22l-6-3.75z" }) });
+var GoogleDriveIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsx("path", { d: "M7.71 3.5L1.15 15l3.43 5.93h13.68l3.44-5.93L15.14 3.5H7.71zm.79 1.5h5.95l5.14 9H8.08l-5.14-9h5.56z" }) });
+var RotateLeftIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-editor__icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" }) });
+var RotateRightIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-editor__icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" }) });
+var FlipHorizontalIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-editor__icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M7.5 21L3 12l4.5-9M16.5 21l4.5-9-4.5-9M12 3v18" }) });
+var FlipVerticalIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-editor__icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M3 7.5L12 3l9 4.5M3 16.5l9 4.5 9-4.5M3 12h18" }) });
+var CropIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-editor__icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M7.5 3v3.75M7.5 15v6M21 7.5h-6M3 7.5h12.75a1.5 1.5 0 011.5 1.5v12.75M7.5 3H3v4.5M7.5 21H21v-4.5" }) });
+var TransformIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-editor__icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.992 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" }) });
+var CloseIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-editor__icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M6 18L18 6M6 6l12 12" }) });
+var SpinnerIcon = () => /* @__PURE__ */ jsxs("svg", { className: "sirv-editor__spinner", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: [
+  /* @__PURE__ */ jsx("circle", { cx: "12", cy: "12", r: "10", strokeOpacity: "0.25" }),
+  /* @__PURE__ */ jsx("path", { d: "M12 2a10 10 0 0110 10", strokeLinecap: "round" })
+] });
 var VideoIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "m15.75 10.5 4.72-4.72a.75.75 0 0 1 1.28.53v11.38a.75.75 0 0 1-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 0 0 2.25-2.25v-9a2.25 2.25 0 0 0-2.25-2.25h-9A2.25 2.25 0 0 0 2.25 7.5v9a2.25 2.25 0 0 0 2.25 2.25Z" }) });
 var Model3DIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "m21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" }) });
 var PdfIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" }) });
+var SpreadsheetIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M3.375 19.5h17.25m-17.25 0a1.125 1.125 0 0 1-1.125-1.125M3.375 19.5h7.5c.621 0 1.125-.504 1.125-1.125m-9.75 0V5.625m0 12.75v-1.5c0-.621.504-1.125 1.125-1.125m18.375 2.625V5.625m0 12.75c0 .621-.504 1.125-1.125 1.125m1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125m0 3.75h-7.5A1.125 1.125 0 0 1 12 18.375m9.75-12.75c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125m19.5 0v1.5c0 .621-.504 1.125-1.125 1.125M2.25 5.625v1.5c0 .621.504 1.125 1.125 1.125m0 0h17.25m-17.25 0h7.5c.621 0 1.125.504 1.125 1.125M3.375 8.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125m17.25-3.75h-7.5c-.621 0-1.125.504-1.125 1.125m8.625-1.125c.621 0 1.125.504 1.125 1.125v1.5c0 .621-.504 1.125-1.125 1.125m-17.25 0h7.5m-7.5 0c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125M12 10.875v-1.5m0 1.5c0 .621-.504 1.125-1.125 1.125M12 10.875c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125M10.875 12h2.25m-2.25 0c-.621 0-1.125.504-1.125 1.125M13.125 12c.621 0 1.125.504 1.125 1.125m-2.25 0v1.5m0-1.5c0 .621-.504 1.125-1.125 1.125m2.25-1.125c0 .621.504 1.125 1.125 1.125m-2.25 0c.621 0 1.125.504 1.125 1.125m-2.25-1.125c-.621 0-1.125.504-1.125 1.125m0 0v1.5c0 .621.504 1.125 1.125 1.125m-1.125-2.625c0 .621.504 1.125 1.125 1.125M12 15.375h2.25m-2.25 0h-2.25" }) });
+var PresentationIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h12a2.25 2.25 0 0 0 2.25-2.25V3M3.75 3h16.5M3.75 3H2.25m17.25 0H21m-9 15.75v-4.5m0 4.5-3-3m3 3 3-3" }) });
+var DocumentIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 11.625h7.5m-7.5 3H12m-5.25 3h10.5a2.25 2.25 0 0 0 2.25-2.25V6.375a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v13.5a2.25 2.25 0 0 0 2.25 2.25Z" }) });
 var FileIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__placeholder-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" }) });
 var EditIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__action-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" }) });
 var RemoveIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__action-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M6 18L18 6M6 6l12 12" }) });
 var PlusIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-staged-grid__add-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M12 4.5v15m7.5-7.5h-15" }) });
-function getPlaceholderIcon(category) {
+var CheckIcon = () => /* @__PURE__ */ jsx("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx("polyline", { points: "20 6 9 17 4 12" }) });
+var ASPECT_RATIOS = [
+  { value: "free", label: "Free", ratio: null },
+  { value: "1:1", label: "1:1", ratio: 1 },
+  { value: "4:3", label: "4:3", ratio: 4 / 3 },
+  { value: "3:4", label: "3:4", ratio: 3 / 4 },
+  { value: "16:9", label: "16:9", ratio: 16 / 9 },
+  { value: "9:16", label: "9:16", ratio: 9 / 16 }
+];
+var CropOverlay = memo(function CropOverlay2({
+  canvasWidth,
+  canvasHeight,
+  crop,
+  onCropChange,
+  aspectRatio,
+  disabled
+}) {
+  const overlayRef = useRef(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragType, setDragType] = useState(null);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [initialCrop, setInitialCrop] = useState(null);
+  const [resizeHandle, setResizeHandle] = useState(null);
+  useEffect(() => {
+    if (!crop) {
+      const ratioConfig = ASPECT_RATIOS.find((r) => r.value === aspectRatio);
+      const ratio = ratioConfig?.ratio;
+      let width = 0.8;
+      let height = 0.8;
+      if (ratio) {
+        const canvasRatio = canvasWidth / canvasHeight;
+        if (ratio > canvasRatio) {
+          width = 0.8;
+          height = width * canvasWidth / (ratio * canvasHeight);
+        } else {
+          height = 0.8;
+          width = height * canvasHeight * ratio / canvasWidth;
+        }
+      }
+      const x = (1 - width) / 2;
+      const y = (1 - height) / 2;
+      onCropChange({ x, y, width, height });
+    }
+  }, [crop, aspectRatio, canvasWidth, canvasHeight, onCropChange]);
+  const getMousePosition = useCallback(
+    (e) => {
+      if (!overlayRef.current) return { x: 0, y: 0 };
+      const rect = overlayRef.current.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left) / rect.width,
+        y: (e.clientY - rect.top) / rect.height
+      };
+    },
+    []
+  );
+  const handleMouseDown = useCallback(
+    (e, type, handle) => {
+      if (disabled || !crop) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(true);
+      setDragType(type);
+      setDragStart(getMousePosition(e));
+      setInitialCrop({ ...crop });
+      if (handle) setResizeHandle(handle);
+    },
+    [disabled, crop, getMousePosition]
+  );
+  useEffect(() => {
+    if (!isDragging || !initialCrop) return;
+    const handleMouseMove = (e) => {
+      const pos = getMousePosition(e);
+      const dx = pos.x - dragStart.x;
+      const dy = pos.y - dragStart.y;
+      if (dragType === "move") {
+        const newX = Math.max(0, Math.min(1 - initialCrop.width, initialCrop.x + dx));
+        const newY = Math.max(0, Math.min(1 - initialCrop.height, initialCrop.y + dy));
+        onCropChange({ ...initialCrop, x: newX, y: newY });
+      } else if (dragType === "resize" && resizeHandle) {
+        let newCrop = { ...initialCrop };
+        const ratioConfig = ASPECT_RATIOS.find((r) => r.value === aspectRatio);
+        const ratio = ratioConfig?.ratio;
+        if (resizeHandle.includes("e")) {
+          newCrop.width = Math.max(0.1, Math.min(1 - initialCrop.x, initialCrop.width + dx));
+        }
+        if (resizeHandle.includes("w")) {
+          const newWidth = Math.max(0.1, Math.min(initialCrop.x + initialCrop.width, initialCrop.width - dx));
+          const newX = initialCrop.x + initialCrop.width - newWidth;
+          newCrop.x = Math.max(0, newX);
+          newCrop.width = newWidth;
+        }
+        if (resizeHandle.includes("s")) {
+          newCrop.height = Math.max(0.1, Math.min(1 - initialCrop.y, initialCrop.height + dy));
+        }
+        if (resizeHandle.includes("n")) {
+          const newHeight = Math.max(0.1, Math.min(initialCrop.y + initialCrop.height, initialCrop.height - dy));
+          const newY = initialCrop.y + initialCrop.height - newHeight;
+          newCrop.y = Math.max(0, newY);
+          newCrop.height = newHeight;
+        }
+        if (ratio) {
+          const cropWidthPx = newCrop.width * canvasWidth;
+          const cropHeightPx = newCrop.height * canvasHeight;
+          const currentRatio = cropWidthPx / cropHeightPx;
+          if (currentRatio > ratio) {
+            newCrop.width = newCrop.height * canvasHeight * ratio / canvasWidth;
+          } else {
+            newCrop.height = newCrop.width * canvasWidth / (ratio * canvasHeight);
+          }
+          if (newCrop.x + newCrop.width > 1) {
+            newCrop.x = 1 - newCrop.width;
+          }
+          if (newCrop.y + newCrop.height > 1) {
+            newCrop.y = 1 - newCrop.height;
+          }
+        }
+        onCropChange(newCrop);
+      }
+    };
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      setDragType(null);
+      setResizeHandle(null);
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging, dragType, dragStart, initialCrop, resizeHandle, aspectRatio, canvasWidth, canvasHeight, getMousePosition, onCropChange]);
+  if (!crop) return null;
+  const style = {
+    left: `${crop.x * 100}%`,
+    top: `${crop.y * 100}%`,
+    width: `${crop.width * 100}%`,
+    height: `${crop.height * 100}%`
+  };
+  return /* @__PURE__ */ jsxs("div", { ref: overlayRef, className: "sirv-editor__crop-overlay", children: [
+    /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-mask" }),
+    /* @__PURE__ */ jsxs(
+      "div",
+      {
+        className: clsx3("sirv-editor__crop-box", isDragging && "sirv-editor__crop-box--dragging"),
+        style,
+        onMouseDown: (e) => handleMouseDown(e, "move"),
+        children: [
+          /* @__PURE__ */ jsxs("div", { className: "sirv-editor__crop-grid", children: [
+            /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-grid-line sirv-editor__crop-grid-line--h1" }),
+            /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-grid-line sirv-editor__crop-grid-line--h2" }),
+            /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-grid-line sirv-editor__crop-grid-line--v1" }),
+            /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-grid-line sirv-editor__crop-grid-line--v2" })
+          ] }),
+          /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-handle sirv-editor__crop-handle--n", onMouseDown: (e) => handleMouseDown(e, "resize", "n") }),
+          /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-handle sirv-editor__crop-handle--s", onMouseDown: (e) => handleMouseDown(e, "resize", "s") }),
+          /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-handle sirv-editor__crop-handle--e", onMouseDown: (e) => handleMouseDown(e, "resize", "e") }),
+          /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-handle sirv-editor__crop-handle--w", onMouseDown: (e) => handleMouseDown(e, "resize", "w") }),
+          /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-handle sirv-editor__crop-handle--ne", onMouseDown: (e) => handleMouseDown(e, "resize", "ne") }),
+          /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-handle sirv-editor__crop-handle--nw", onMouseDown: (e) => handleMouseDown(e, "resize", "nw") }),
+          /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-handle sirv-editor__crop-handle--se", onMouseDown: (e) => handleMouseDown(e, "resize", "se") }),
+          /* @__PURE__ */ jsx("div", { className: "sirv-editor__crop-handle sirv-editor__crop-handle--sw", onMouseDown: (e) => handleMouseDown(e, "resize", "sw") })
+        ]
+      }
+    )
+  ] });
+});
+var DEFAULT_EDITOR_LABELS = {
+  title: "Edit Image",
+  apply: "Apply",
+  cancel: "Cancel",
+  reset: "Reset",
+  rotateLeft: "Rotate Left",
+  rotateRight: "Rotate Right",
+  flipHorizontal: "Flip Horizontal",
+  flipVertical: "Flip Vertical",
+  crop: "Crop",
+  transform: "Transform",
+  aspectRatio: "Aspect Ratio",
+  aspectFree: "Free"
+};
+function ImageEditor({
+  file,
+  previewUrl,
+  onApply,
+  onCancel,
+  labels = {}
+}) {
+  const [mode, setMode] = useState("transform");
+  const editor = useImageEditor({
+    file,
+    previewUrl,
+    onApply,
+    onCancel
+  });
+  const l = useMemo(() => ({ ...DEFAULT_EDITOR_LABELS, ...labels }), [labels]);
+  const handleModeChange = useCallback(
+    (newMode) => {
+      if (newMode === "crop" && !editor.state.crop) {
+        editor.setCrop({ x: 0.1, y: 0.1, width: 0.8, height: 0.8 });
+      }
+      if (mode === "crop" && newMode !== "crop") {
+        editor.setCrop(null);
+      }
+      setMode(newMode);
+    },
+    [editor, mode]
+  );
+  const handleClearCrop = useCallback(() => {
+    editor.setCrop(null);
+  }, [editor]);
+  const isProcessing = editor.isLoading || editor.isApplying;
+  return /* @__PURE__ */ jsx("div", { className: "sirv-editor-overlay", onClick: onCancel, children: /* @__PURE__ */ jsxs("div", { className: "sirv-editor", onClick: (e) => e.stopPropagation(), children: [
+    /* @__PURE__ */ jsxs("div", { className: "sirv-editor__header", children: [
+      /* @__PURE__ */ jsx("h2", { className: "sirv-editor__title", children: l.title }),
+      /* @__PURE__ */ jsxs("div", { className: "sirv-editor__header-actions", children: [
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: "sirv-editor__header-btn",
+            onClick: editor.reset,
+            disabled: !editor.hasChanges,
+            children: l.reset
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: "sirv-editor__close",
+            onClick: onCancel,
+            children: /* @__PURE__ */ jsx(CloseIcon, {})
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "sirv-editor__tabs", children: [
+      /* @__PURE__ */ jsxs(
+        "button",
+        {
+          type: "button",
+          className: clsx3("sirv-editor__tab", mode === "transform" && "sirv-editor__tab--active"),
+          onClick: () => handleModeChange("transform"),
+          disabled: isProcessing,
+          children: [
+            /* @__PURE__ */ jsx(TransformIcon, {}),
+            l.transform
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxs(
+        "button",
+        {
+          type: "button",
+          className: clsx3("sirv-editor__tab", mode === "crop" && "sirv-editor__tab--active"),
+          onClick: () => handleModeChange("crop"),
+          disabled: isProcessing,
+          children: [
+            /* @__PURE__ */ jsx(CropIcon, {}),
+            l.crop
+          ]
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "sirv-editor__canvas-area", children: editor.isLoading ? /* @__PURE__ */ jsxs("div", { className: "sirv-editor__loading", children: [
+      /* @__PURE__ */ jsx(SpinnerIcon, {}),
+      /* @__PURE__ */ jsx("span", { children: "Loading..." })
+    ] }) : /* @__PURE__ */ jsxs("div", { className: "sirv-editor__canvas-wrapper", children: [
+      /* @__PURE__ */ jsx(
+        "canvas",
+        {
+          ref: editor.canvasRef,
+          className: "sirv-editor__canvas"
+        }
+      ),
+      mode === "crop" && editor.imageLoaded && /* @__PURE__ */ jsx(
+        CropOverlay,
+        {
+          canvasWidth: editor.canvasSize.width,
+          canvasHeight: editor.canvasSize.height,
+          crop: editor.state.crop,
+          onCropChange: editor.setCrop,
+          aspectRatio: editor.aspectRatio,
+          disabled: isProcessing
+        }
+      )
+    ] }) }),
+    /* @__PURE__ */ jsxs("div", { className: "sirv-editor__controls", children: [
+      mode === "transform" && /* @__PURE__ */ jsxs("div", { className: "sirv-editor__transform-controls", children: [
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: "sirv-editor__control-btn",
+            onClick: editor.rotateLeft,
+            disabled: isProcessing,
+            title: l.rotateLeft,
+            children: /* @__PURE__ */ jsx(RotateLeftIcon, {})
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: "sirv-editor__control-btn",
+            onClick: editor.rotateRight,
+            disabled: isProcessing,
+            title: l.rotateRight,
+            children: /* @__PURE__ */ jsx(RotateRightIcon, {})
+          }
+        ),
+        /* @__PURE__ */ jsx("div", { className: "sirv-editor__control-divider" }),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: clsx3("sirv-editor__control-btn", editor.state.flipH && "sirv-editor__control-btn--active"),
+            onClick: editor.flipHorizontal,
+            disabled: isProcessing,
+            title: l.flipHorizontal,
+            children: /* @__PURE__ */ jsx(FlipHorizontalIcon, {})
+          }
+        ),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: clsx3("sirv-editor__control-btn", editor.state.flipV && "sirv-editor__control-btn--active"),
+            onClick: editor.flipVertical,
+            disabled: isProcessing,
+            title: l.flipVertical,
+            children: /* @__PURE__ */ jsx(FlipVerticalIcon, {})
+          }
+        )
+      ] }),
+      mode === "crop" && /* @__PURE__ */ jsxs("div", { className: "sirv-editor__crop-controls", children: [
+        /* @__PURE__ */ jsxs("label", { className: "sirv-editor__control-label", children: [
+          l.aspectRatio,
+          ":"
+        ] }),
+        /* @__PURE__ */ jsx("div", { className: "sirv-editor__aspect-buttons", children: ASPECT_RATIOS.map((ratio) => /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: clsx3(
+              "sirv-editor__aspect-btn",
+              editor.aspectRatio === ratio.value && "sirv-editor__aspect-btn--active"
+            ),
+            onClick: () => {
+              editor.setAspectRatio(ratio.value);
+              editor.setCrop(null);
+            },
+            disabled: isProcessing,
+            children: ratio.label
+          },
+          ratio.value
+        )) }),
+        editor.state.crop && /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: "sirv-editor__clear-crop",
+            onClick: handleClearCrop,
+            disabled: isProcessing,
+            children: "Clear"
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "sirv-editor__footer", children: [
+      /* @__PURE__ */ jsx(
+        "button",
+        {
+          type: "button",
+          className: "sirv-btn",
+          onClick: onCancel,
+          children: l.cancel
+        }
+      ),
+      /* @__PURE__ */ jsx(
+        "button",
+        {
+          type: "button",
+          className: "sirv-btn sirv-btn--primary",
+          onClick: editor.apply,
+          disabled: isProcessing || !editor.hasChanges,
+          children: editor.isApplying ? /* @__PURE__ */ jsxs(Fragment, { children: [
+            /* @__PURE__ */ jsx(SpinnerIcon, {}),
+            "Applying..."
+          ] }) : l.apply
+        }
+      )
+    ] })
+  ] }) });
+}
+var SPREADSHEET_EXTENSIONS = /* @__PURE__ */ new Set(["xls", "xlsx", "csv", "tsv", "ods", "numbers"]);
+var PRESENTATION_EXTENSIONS = /* @__PURE__ */ new Set(["ppt", "pptx", "odp", "key"]);
+var DOCUMENT_EXTENSIONS = /* @__PURE__ */ new Set(["doc", "docx", "odt", "rtf", "txt", "pages"]);
+function getPlaceholderIcon(category, filename) {
+  if (filename) {
+    const ext = filename.toLowerCase().split(".").pop();
+    if (ext) {
+      if (SPREADSHEET_EXTENSIONS.has(ext)) return /* @__PURE__ */ jsx(SpreadsheetIcon, {});
+      if (PRESENTATION_EXTENSIONS.has(ext)) return /* @__PURE__ */ jsx(PresentationIcon, {});
+      if (DOCUMENT_EXTENSIONS.has(ext)) return /* @__PURE__ */ jsx(DocumentIcon, {});
+    }
+  }
   switch (category) {
     case "video":
       return /* @__PURE__ */ jsx(VideoIcon, {});
@@ -965,19 +1591,97 @@ function getPlaceholderIcon(category) {
       return /* @__PURE__ */ jsx(FileIcon, {});
   }
 }
+var FileItem2 = memo(function FileItem3({
+  file,
+  disabled,
+  showFilenames,
+  canEdit,
+  onRemove,
+  onEdit,
+  labels
+}) {
+  const hasPreview = !!file.previewUrl;
+  const handleRemove = useCallback(() => {
+    onRemove(file.id);
+  }, [onRemove, file.id]);
+  const handleEdit = useCallback(() => {
+    onEdit(file);
+  }, [onEdit, file]);
+  return /* @__PURE__ */ jsxs(
+    "div",
+    {
+      className: clsx3(
+        "sirv-staged-grid__item",
+        file.status === "error" && "sirv-staged-grid__item--error",
+        file.status === "uploading" && "sirv-staged-grid__item--uploading",
+        file.status === "success" && "sirv-staged-grid__item--success"
+      ),
+      children: [
+        /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__preview", children: [
+          hasPreview ? /* @__PURE__ */ jsx(
+            "img",
+            {
+              src: file.previewUrl,
+              alt: file.filename,
+              className: "sirv-staged-grid__image"
+            }
+          ) : /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__placeholder", children: getPlaceholderIcon(file.fileCategory, file.filename) }),
+          !disabled && /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__overlay", children: [
+            canEdit && /* @__PURE__ */ jsx(
+              "button",
+              {
+                type: "button",
+                className: "sirv-staged-grid__action sirv-staged-grid__action--edit",
+                onClick: handleEdit,
+                title: labels.edit || "Edit",
+                children: /* @__PURE__ */ jsx(EditIcon, {})
+              }
+            ),
+            /* @__PURE__ */ jsx(
+              "button",
+              {
+                type: "button",
+                className: "sirv-staged-grid__action sirv-staged-grid__action--remove",
+                onClick: handleRemove,
+                title: labels.remove || "Remove",
+                children: /* @__PURE__ */ jsx(RemoveIcon, {})
+              }
+            )
+          ] }),
+          file.status === "uploading" && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__progress", children: /* @__PURE__ */ jsx(
+            "div",
+            {
+              className: "sirv-staged-grid__progress-bar",
+              style: { width: `${file.progress}%` }
+            }
+          ) }),
+          file.status === "success" && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__success-badge", children: /* @__PURE__ */ jsx(CheckIcon, {}) })
+        ] }),
+        showFilenames && /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__info", children: [
+          /* @__PURE__ */ jsx("span", { className: "sirv-staged-grid__filename", title: file.filename, children: file.filename }),
+          file.size && /* @__PURE__ */ jsx("span", { className: "sirv-staged-grid__size", children: formatFileSize(file.size) })
+        ] }),
+        file.error && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__error", title: file.error, children: file.error })
+      ]
+    }
+  );
+});
 function StagedFilesGrid({
   files,
   onRemove,
   onEdit,
+  onFileEdited,
   onAddMore,
   maxFiles = 50,
   accept,
   disabled = false,
   showFilenames = true,
+  enableEditor = false,
   className,
   labels = {}
 }) {
   const inputRef = useRef(null);
+  const [editingFile, setEditingFile] = useState(null);
   const handleAddMoreClick = useCallback(() => {
     if (!disabled) {
       inputRef.current?.click();
@@ -992,6 +1696,7 @@ function StagedFilesGrid({
         filename: file.name,
         previewUrl: canPreviewFile(file) ? URL.createObjectURL(file) : "",
         size: file.size,
+        fileCategory: getFileCategory(file),
         status: "pending",
         progress: 0
       }));
@@ -1000,333 +1705,84 @@ function StagedFilesGrid({
     },
     [onAddMore]
   );
+  const handleEditClick = useCallback(
+    (file) => {
+      if (enableEditor && file.file && file.previewUrl) {
+        setEditingFile(file);
+      } else if (onEdit) {
+        onEdit(file);
+      }
+    },
+    [enableEditor, onEdit]
+  );
+  const handleEditorApply = useCallback(
+    (editedFile, previewUrl) => {
+      if (!editingFile) return;
+      if (editingFile.previewUrl) {
+        URL.revokeObjectURL(editingFile.previewUrl);
+      }
+      if (onFileEdited) {
+        onFileEdited(editingFile.id, editedFile, previewUrl);
+      }
+      setEditingFile(null);
+    },
+    [editingFile, onFileEdited]
+  );
+  const handleEditorCancel = useCallback(() => {
+    setEditingFile(null);
+  }, []);
   const canAddMore = files.length < maxFiles && onAddMore;
-  return /* @__PURE__ */ jsx("div", { className: clsx6("sirv-staged-grid", className), children: /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__items", children: [
-    files.map((file) => {
-      const hasPreview = !!file.previewUrl;
-      const canEditFile = onEdit && file.file && hasPreview;
-      return /* @__PURE__ */ jsxs(
-        "div",
+  const itemLabels = useMemo(() => ({ edit: labels.edit, remove: labels.remove }), [labels.edit, labels.remove]);
+  return /* @__PURE__ */ jsxs("div", { className: clsx3("sirv-staged-grid", className), children: [
+    /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__items", children: [
+      files.map((file) => /* @__PURE__ */ jsx(
+        FileItem2,
         {
-          className: clsx6(
-            "sirv-staged-grid__item",
-            file.status === "error" && "sirv-staged-grid__item--error",
-            file.status === "uploading" && "sirv-staged-grid__item--uploading",
-            file.status === "success" && "sirv-staged-grid__item--success"
-          ),
-          children: [
-            /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__preview", children: [
-              hasPreview ? /* @__PURE__ */ jsx(
-                "img",
-                {
-                  src: file.previewUrl,
-                  alt: file.filename,
-                  className: "sirv-staged-grid__image"
-                }
-              ) : /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__placeholder", children: getPlaceholderIcon(file.fileCategory) }),
-              !disabled && /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__overlay", children: [
-                canEditFile && /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    type: "button",
-                    className: "sirv-staged-grid__action sirv-staged-grid__action--edit",
-                    onClick: () => onEdit(file),
-                    title: labels.edit || "Edit",
-                    children: /* @__PURE__ */ jsx(EditIcon, {})
-                  }
-                ),
-                /* @__PURE__ */ jsx(
-                  "button",
-                  {
-                    type: "button",
-                    className: "sirv-staged-grid__action sirv-staged-grid__action--remove",
-                    onClick: () => onRemove(file.id),
-                    title: labels.remove || "Remove",
-                    children: /* @__PURE__ */ jsx(RemoveIcon, {})
-                  }
-                )
-              ] }),
-              file.status === "uploading" && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__progress", children: /* @__PURE__ */ jsx(
-                "div",
-                {
-                  className: "sirv-staged-grid__progress-bar",
-                  style: { width: `${file.progress}%` }
-                }
-              ) }),
-              file.status === "success" && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__success-badge", children: /* @__PURE__ */ jsx("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx("polyline", { points: "20 6 9 17 4 12" }) }) })
-            ] }),
-            showFilenames && /* @__PURE__ */ jsxs("div", { className: "sirv-staged-grid__info", children: [
-              /* @__PURE__ */ jsx("span", { className: "sirv-staged-grid__filename", title: file.filename, children: file.filename }),
-              file.size && /* @__PURE__ */ jsx("span", { className: "sirv-staged-grid__size", children: formatFileSize(file.size) })
-            ] }),
-            file.error && /* @__PURE__ */ jsx("div", { className: "sirv-staged-grid__error", title: file.error, children: file.error })
-          ]
+          file,
+          disabled,
+          showFilenames,
+          canEdit: !!(onEdit || enableEditor) && !!file.file && !!file.previewUrl,
+          onRemove,
+          onEdit: handleEditClick,
+          labels: itemLabels
         },
         file.id
-      );
-    }),
-    canAddMore && /* @__PURE__ */ jsxs(
-      "button",
-      {
-        type: "button",
-        className: "sirv-staged-grid__add-tile",
-        onClick: handleAddMoreClick,
-        disabled,
-        children: [
-          /* @__PURE__ */ jsx(PlusIcon, {}),
-          /* @__PURE__ */ jsx("span", { children: labels.addMore || "Add more" }),
-          /* @__PURE__ */ jsx(
-            "input",
-            {
-              ref: inputRef,
-              type: "file",
-              accept,
-              multiple: true,
-              onChange: handleFileChange,
-              className: "sirv-staged-grid__input"
-            }
-          )
-        ]
-      }
-    )
-  ] }) });
-}
-function FilePicker({
-  endpoint,
-  isOpen,
-  onClose,
-  onSelect,
-  fileType = "image",
-  multiple = false,
-  initialPath = "/",
-  className,
-  labels = {}
-}) {
-  const [currentPath, setCurrentPath] = useState(initialPath);
-  const [items, setItems] = useState([]);
-  const [selectedItems, setSelectedItems] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const searchTimeoutRef = useRef(null);
-  const fetchItems = useCallback(
-    async (path, search) => {
-      setIsLoading(true);
-      setError(null);
-      try {
-        const params = new URLSearchParams({ path });
-        if (fileType !== "all") params.set("type", fileType);
-        if (search) params.set("search", search);
-        const response = await fetch(`${endpoint}/browse?${params}`);
-        if (!response.ok) {
-          throw new Error(`Failed to load files: ${response.status}`);
-        }
-        const data = await response.json();
-        if (!data.success) {
-          throw new Error(data.error || "Failed to load files");
-        }
-        setItems(data.items || []);
-        setCurrentPath(data.path);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load files");
-        setItems([]);
-      } finally {
-        setIsLoading(false);
-      }
-    },
-    [endpoint, fileType]
-  );
-  useEffect(() => {
-    if (isOpen) {
-      setSelectedItems([]);
-      setSearchQuery("");
-      fetchItems(initialPath);
-    }
-  }, [isOpen, initialPath, fetchItems]);
-  useEffect(() => {
-    if (!isOpen) return;
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-    searchTimeoutRef.current = setTimeout(() => {
-      fetchItems(currentPath, searchQuery || void 0);
-    }, 300);
-    return () => {
-      if (searchTimeoutRef.current) {
-        clearTimeout(searchTimeoutRef.current);
-      }
-    };
-  }, [searchQuery, currentPath, isOpen, fetchItems]);
-  const handleNavigate = useCallback((path) => {
-    setSearchQuery("");
-    setCurrentPath(path);
-  }, []);
-  const handleGoUp = useCallback(() => {
-    const parentPath = currentPath.split("/").slice(0, -1).join("/") || "/";
-    handleNavigate(parentPath);
-  }, [currentPath, handleNavigate]);
-  const handleItemClick = useCallback(
-    (item) => {
-      if (item.type === "folder") {
-        handleNavigate(item.path);
-        return;
-      }
-      if (multiple) {
-        setSelectedItems((prev) => {
-          const isSelected = prev.some((i) => i.path === item.path);
-          if (isSelected) {
-            return prev.filter((i) => i.path !== item.path);
-          }
-          return [...prev, item];
-        });
-      } else {
-        setSelectedItems([item]);
-      }
-    },
-    [multiple, handleNavigate]
-  );
-  const handleSelect = useCallback(() => {
-    if (selectedItems.length > 0) {
-      onSelect(selectedItems);
-      onClose();
-    }
-  }, [selectedItems, onSelect, onClose]);
-  const handleKeyDown = useCallback(
-    (e) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    },
-    [onClose]
-  );
-  const breadcrumbs = currentPath.split("/").filter(Boolean);
-  if (!isOpen) return null;
-  return /* @__PURE__ */ jsx(
-    "div",
-    {
-      className: clsx6("sirv-filepicker-overlay", className),
-      onClick: onClose,
-      onKeyDown: handleKeyDown,
-      role: "dialog",
-      "aria-modal": "true",
-      "aria-label": labels.title || "Select files from Sirv",
-      children: /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker", onClick: (e) => e.stopPropagation(), children: [
-        /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker__header", children: [
-          /* @__PURE__ */ jsx("h2", { className: "sirv-filepicker__title", children: labels.title || "Select from Sirv" }),
-          /* @__PURE__ */ jsx(
-            "button",
-            {
-              type: "button",
-              className: "sirv-filepicker__close",
-              onClick: onClose,
-              "aria-label": "Close",
-              children: /* @__PURE__ */ jsxs("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: [
-                /* @__PURE__ */ jsx("line", { x1: "18", y1: "6", x2: "6", y2: "18" }),
-                /* @__PURE__ */ jsx("line", { x1: "6", y1: "6", x2: "18", y2: "18" })
-              ] })
-            }
-          )
-        ] }),
-        /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker__toolbar", children: [
-          /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker__breadcrumbs", children: [
+      )),
+      canAddMore && /* @__PURE__ */ jsxs(
+        "button",
+        {
+          type: "button",
+          className: "sirv-staged-grid__add-tile",
+          onClick: handleAddMoreClick,
+          disabled,
+          children: [
+            /* @__PURE__ */ jsx(PlusIcon, {}),
+            /* @__PURE__ */ jsx("span", { children: labels.addMore || "Add more" }),
             /* @__PURE__ */ jsx(
-              "button",
+              "input",
               {
-                type: "button",
-                className: "sirv-filepicker__breadcrumb",
-                onClick: () => handleNavigate("/"),
-                children: /* @__PURE__ */ jsx("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx("path", { d: "M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" }) })
-              }
-            ),
-            breadcrumbs.map((part, index) => /* @__PURE__ */ jsxs("span", { children: [
-              /* @__PURE__ */ jsx("span", { className: "sirv-filepicker__breadcrumb-separator", children: "/" }),
-              /* @__PURE__ */ jsx(
-                "button",
-                {
-                  type: "button",
-                  className: "sirv-filepicker__breadcrumb",
-                  onClick: () => handleNavigate("/" + breadcrumbs.slice(0, index + 1).join("/")),
-                  children: part
-                }
-              )
-            ] }, index))
-          ] }),
-          /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__search", children: /* @__PURE__ */ jsx(
-            "input",
-            {
-              type: "text",
-              value: searchQuery,
-              onChange: (e) => setSearchQuery(e.target.value),
-              placeholder: labels.search || "Search...",
-              className: "sirv-filepicker__search-input"
-            }
-          ) })
-        ] }),
-        /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__content", children: isLoading ? /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker__loading", children: [
-          /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__spinner" }),
-          /* @__PURE__ */ jsx("p", { children: labels.loading || "Loading..." })
-        ] }) : error ? /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker__error", children: [
-          /* @__PURE__ */ jsx("p", { children: error }),
-          /* @__PURE__ */ jsx("button", { type: "button", onClick: () => fetchItems(currentPath), children: "Retry" })
-        ] }) : items.length === 0 ? /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__empty", children: /* @__PURE__ */ jsx("p", { children: labels.empty || "No files found" }) }) : /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker__grid", children: [
-          currentPath !== "/" && /* @__PURE__ */ jsxs(
-            "button",
-            {
-              type: "button",
-              className: "sirv-filepicker__item sirv-filepicker__item--folder",
-              onClick: handleGoUp,
-              children: [
-                /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__item-icon", children: /* @__PURE__ */ jsx("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx("path", { d: "M15 18l-6-6 6-6" }) }) }),
-                /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__item-name", children: ".." })
-              ]
-            }
-          ),
-          items.map((item) => {
-            const isSelected = selectedItems.some((i) => i.path === item.path);
-            return /* @__PURE__ */ jsxs(
-              "button",
-              {
-                type: "button",
-                className: clsx6(
-                  "sirv-filepicker__item",
-                  `sirv-filepicker__item--${item.type}`,
-                  isSelected && "sirv-filepicker__item--selected"
-                ),
-                onClick: () => handleItemClick(item),
-                children: [
-                  item.type === "folder" ? /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__item-icon", children: /* @__PURE__ */ jsx("svg", { viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsx("path", { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }) }) }) : item.thumbnail ? /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__item-thumbnail", children: /* @__PURE__ */ jsx("img", { src: item.thumbnail, alt: "" }) }) : /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__item-icon", children: /* @__PURE__ */ jsxs("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: [
-                    /* @__PURE__ */ jsx("rect", { x: "3", y: "3", width: "18", height: "18", rx: "2", ry: "2" }),
-                    /* @__PURE__ */ jsx("circle", { cx: "8.5", cy: "8.5", r: "1.5" }),
-                    /* @__PURE__ */ jsx("polyline", { points: "21 15 16 10 5 21" })
-                  ] }) }),
-                  /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__item-name", title: item.name, children: item.name }),
-                  item.size && /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__item-size", children: formatFileSize(item.size) }),
-                  isSelected && /* @__PURE__ */ jsx("div", { className: "sirv-filepicker__item-check", children: /* @__PURE__ */ jsx("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "3", children: /* @__PURE__ */ jsx("polyline", { points: "20 6 9 17 4 12" }) }) })
-                ]
-              },
-              item.path
-            );
-          })
-        ] }) }),
-        /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker__footer", children: [
-          /* @__PURE__ */ jsx("span", { className: "sirv-filepicker__selection-count", children: selectedItems.length > 0 ? `${selectedItems.length} file${selectedItems.length !== 1 ? "s" : ""} selected` : "No files selected" }),
-          /* @__PURE__ */ jsxs("div", { className: "sirv-filepicker__actions", children: [
-            /* @__PURE__ */ jsx("button", { type: "button", className: "sirv-filepicker__btn", onClick: onClose, children: labels.cancel || "Cancel" }),
-            /* @__PURE__ */ jsx(
-              "button",
-              {
-                type: "button",
-                className: "sirv-filepicker__btn sirv-filepicker__btn--primary",
-                onClick: handleSelect,
-                disabled: selectedItems.length === 0,
-                children: labels.select || "Select"
+                ref: inputRef,
+                type: "file",
+                accept,
+                multiple: true,
+                onChange: handleFileChange,
+                className: "sirv-staged-grid__input"
               }
             )
-          ] })
-        ] })
-      ] })
-    }
-  );
+          ]
+        }
+      )
+    ] }),
+    editingFile && editingFile.file && editingFile.previewUrl && /* @__PURE__ */ jsx(
+      ImageEditor,
+      {
+        file: editingFile.file,
+        previewUrl: editingFile.previewUrl,
+        onApply: handleEditorApply,
+        onCancel: handleEditorCancel
+      }
+    )
+  ] });
 }
 function SpreadsheetImport({
   onUrls,
@@ -1417,11 +1873,11 @@ function SpreadsheetImport({
     setSelectedColumn("");
     setError(null);
   }, []);
-  return /* @__PURE__ */ jsx("div", { className: clsx6("sirv-spreadsheet", className), children: !result ? /* @__PURE__ */ jsxs(Fragment, { children: [
+  return /* @__PURE__ */ jsx("div", { className: clsx3("sirv-spreadsheet", className), children: !result ? /* @__PURE__ */ jsxs(Fragment, { children: [
     /* @__PURE__ */ jsxs(
       "div",
       {
-        className: clsx6(
+        className: clsx3(
           "sirv-spreadsheet__drop",
           isDragOver && "sirv-spreadsheet__drop--active"
         ),
@@ -1553,7 +2009,6 @@ function SpreadsheetImport({
 }
 function useSirvUpload(options) {
   const {
-    presignEndpoint,
     proxyEndpoint,
     folder,
     onConflict,
@@ -1571,55 +2026,13 @@ function useSirvUpload(options) {
       (prev) => prev.map((f) => f.id === id ? { ...f, ...updates } : f)
     );
   }, []);
-  const uploadWithPresign = useCallback(
-    async (file, signal) => {
-      if (!presignEndpoint) throw new Error("No presign endpoint configured");
-      if (!file.file) throw new Error("No file data");
-      const presignRes = await fetch(presignEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file.filename,
-          contentType: getMimeType(file.file),
-          folder,
-          size: file.file.size
-        }),
-        signal
-      });
-      if (!presignRes.ok) {
-        const err = await presignRes.json().catch(() => ({}));
-        throw new Error(err.error || `Failed to get upload URL: ${presignRes.status}`);
-      }
-      const { uploadUrl, publicUrl, path, error } = await presignRes.json();
-      if (error) throw new Error(error);
-      if (!uploadUrl) throw new Error("No upload URL returned");
-      updateFile(file.id, { status: "uploading", progress: 10 });
-      const uploadRes = await fetch(uploadUrl, {
-        method: "PUT",
-        body: file.file,
-        headers: {
-          "Content-Type": getMimeType(file.file)
-        },
-        signal
-      });
-      if (!uploadRes.ok) {
-        throw new Error(`Upload failed: ${uploadRes.status}`);
-      }
-      updateFile(file.id, {
-        status: "success",
-        progress: 100,
-        sirvUrl: publicUrl,
-        sirvPath: path
-      });
-    },
-    [presignEndpoint, folder, updateFile]
-  );
   const uploadWithProxy = useCallback(
     async (file, signal) => {
       if (!proxyEndpoint) throw new Error("No proxy endpoint configured");
       if (!file.file) throw new Error("No file data");
       updateFile(file.id, { status: "uploading", progress: 10 });
-      const uploadUrl = new URL(`${proxyEndpoint}/upload`);
+      const baseUrl = proxyEndpoint.startsWith("http") ? proxyEndpoint : `${typeof window !== "undefined" ? window.location.origin : ""}${proxyEndpoint}`;
+      const uploadUrl = new URL(`${baseUrl}/upload`);
       uploadUrl.searchParams.set("filename", file.filename);
       uploadUrl.searchParams.set("folder", folder);
       updateFile(file.id, { progress: 30 });
@@ -1655,13 +2068,7 @@ function useSirvUpload(options) {
       abortControllers.current.set(id, controller);
       try {
         updateFile(id, { status: "uploading", progress: 0, error: void 0 });
-        if (presignEndpoint) {
-          await uploadWithPresign(file, controller.signal);
-        } else if (proxyEndpoint) {
-          await uploadWithProxy(file, controller.signal);
-        } else {
-          throw new Error("No upload endpoint configured");
-        }
+        await uploadWithProxy(file, controller.signal);
         const updatedFile = files.find((f) => f.id === id);
         if (updatedFile && onUpload) {
           onUpload([{ ...updatedFile, status: "success" }]);
@@ -1680,7 +2087,7 @@ function useSirvUpload(options) {
         processQueue();
       }
     },
-    [files, presignEndpoint, proxyEndpoint, uploadWithPresign, uploadWithProxy, updateFile, onUpload, onError]
+    [files, proxyEndpoint, uploadWithProxy, updateFile, onUpload, onError]
   );
   const processQueue = useCallback(() => {
     while (activeUploads.current < concurrency && uploadQueue.current.length > 0) {
@@ -2065,6 +2472,67 @@ function useGoogleDrivePicker({
     clearSession
   };
 }
+function useExternalImport({
+  maxFiles,
+  onComplete
+}) {
+  const [isImporting, setIsImporting] = useState(false);
+  const [progress, setProgress] = useState({ current: 0, total: 0, source: "" });
+  const downloadFile = useCallback(async (url, filename, accessToken) => {
+    try {
+      const headers = {};
+      if (accessToken) {
+        headers.Authorization = `Bearer ${accessToken}`;
+      }
+      const response = await fetch(url, { headers });
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const file = new File([blob], filename, { type: blob.type || "image/png" });
+      return {
+        id: generateId(),
+        file,
+        filename,
+        previewUrl: URL.createObjectURL(blob),
+        size: blob.size,
+        status: "pending",
+        progress: 0
+      };
+    } catch (err) {
+      console.error(`Failed to download ${filename}:`, err);
+      return null;
+    }
+  }, []);
+  const importFiles = useCallback(
+    async (files, source) => {
+      const filesToImport = files.slice(0, maxFiles);
+      if (filesToImport.length === 0) return;
+      setIsImporting(true);
+      setProgress({ current: 0, total: filesToImport.length, source });
+      const BATCH_SIZE = 3;
+      const results = [];
+      for (let i = 0; i < filesToImport.length; i += BATCH_SIZE) {
+        const batch = filesToImport.slice(i, i + BATCH_SIZE);
+        const batchPromises = batch.map((f) => downloadFile(f.url, f.name, f.accessToken));
+        const batchResults = await Promise.all(batchPromises);
+        for (const result of batchResults) {
+          if (result) results.push(result);
+        }
+        setProgress({ current: Math.min(i + BATCH_SIZE, filesToImport.length), total: filesToImport.length, source });
+      }
+      setIsImporting(false);
+      setProgress({ current: 0, total: 0, source: "" });
+      if (results.length > 0) {
+        onComplete(results);
+      }
+    },
+    [maxFiles, downloadFile, onComplete]
+  );
+  return {
+    isImporting,
+    progress,
+    importFiles
+  };
+}
 var DEFAULT_LABELS = {
   dropzone: "Drop files here or click to browse",
   dropzoneHint: "Supports JPG, PNG, WebP, GIF, HEIC up to 10MB",
@@ -2093,14 +2561,48 @@ var DEFAULT_LABELS = {
   conflictMessage: "A file with this name already exists.",
   filesSelected: "files selected"
 };
-var UploadIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" }) });
-var UrlIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "1.5", children: /* @__PURE__ */ jsx("path", { strokeLinecap: "round", strokeLinejoin: "round", d: "M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" }) });
-var DropboxIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsx("path", { d: "M6 2l6 3.75L6 9.5 0 5.75 6 2zm12 0l6 3.75-6 3.75-6-3.75L18 2zM0 13.25L6 9.5l6 3.75L6 17 0 13.25zm18-3.75l6 3.75L18 17l-6-3.75 6-3.75zM6 18.25l6-3.75 6 3.75L12 22l-6-3.75z" }) });
-var GoogleDriveIcon = () => /* @__PURE__ */ jsx("svg", { className: "sirv-uploader__tab-icon", viewBox: "0 0 24 24", fill: "currentColor", children: /* @__PURE__ */ jsx("path", { d: "M7.71 3.5L1.15 15l3.43 5.93h13.68l3.44-5.93L15.14 3.5H7.71zm.79 1.5h5.95l5.14 9H8.08l-5.14-9h5.56z" }) });
+var TabButton = memo(function TabButton2({ active, onClick, icon, label }) {
+  return /* @__PURE__ */ jsxs(
+    "button",
+    {
+      type: "button",
+      className: clsx3("sirv-tabs__tab", active && "sirv-tabs__tab--active"),
+      onClick,
+      children: [
+        icon,
+        label
+      ]
+    }
+  );
+});
+var ExternalPickerPanel = memo(function ExternalPickerPanel2({
+  icon,
+  title,
+  description,
+  buttonLabel,
+  onOpen,
+  disabled,
+  isLoading,
+  variant
+}) {
+  return /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__external-picker", children: [
+    /* @__PURE__ */ jsx("div", { className: `sirv-uploader__external-icon sirv-uploader__external-icon--${variant}`, children: icon }),
+    /* @__PURE__ */ jsx("h3", { className: "sirv-uploader__external-title", children: title }),
+    /* @__PURE__ */ jsx("p", { className: "sirv-uploader__external-description", children: description }),
+    /* @__PURE__ */ jsx(
+      "button",
+      {
+        type: "button",
+        className: `sirv-btn sirv-btn--primary sirv-btn--${variant}`,
+        onClick: onOpen,
+        disabled: disabled || isLoading,
+        children: isLoading ? "Loading..." : buttonLabel
+      }
+    )
+  ] });
+});
 function SirvUploader({
-  presignEndpoint,
   proxyEndpoint,
-  sirvAccount,
   folder = "/",
   onUpload,
   onError,
@@ -2122,26 +2624,23 @@ function SirvUploader({
   labels: customLabels = {},
   children
 }) {
-  const labels = { ...DEFAULT_LABELS, ...customLabels };
+  const labels = useMemo(() => ({ ...DEFAULT_LABELS, ...customLabels }), [customLabels]);
   const {
     batch = true,
     csvImport = true,
-    filePicker = true,
     dragDrop = true,
     paste = true,
-    allAssets = false
+    allAssets = false,
+    imageEditor = true
   } = features;
   const [activeTab, setActiveTab] = useState("upload");
-  const [isPickerOpen, setIsPickerOpen] = useState(false);
   const [stagedFiles, setStagedFiles] = useState([]);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState({ current: 0, total: 0, source: "" });
-  const showStagedMode = !autoUpload && stagedFiles.length > 0;
-  if (!presignEndpoint && !proxyEndpoint) {
-    console.warn("SirvUploader: Either presignEndpoint or proxyEndpoint must be provided");
-  }
+  useMemo(() => {
+    if (!proxyEndpoint) {
+      console.warn("SirvUploader: proxyEndpoint is required");
+    }
+  }, [proxyEndpoint]);
   const upload = useSirvUpload({
-    presignEndpoint,
     proxyEndpoint,
     folder,
     onConflict,
@@ -2150,6 +2649,20 @@ function SirvUploader({
     onUpload,
     onError
   });
+  const showStagedMode = !autoUpload && stagedFiles.length > 0;
+  const hasFiles = showStagedMode ? stagedFiles.length > 0 : upload.files.length > 0;
+  const hasPendingFiles = useMemo(() => {
+    const files = showStagedMode ? stagedFiles : upload.files;
+    return files.some((f) => f.status === "pending" || f.status === "error");
+  }, [showStagedMode, stagedFiles, upload.files]);
+  const acceptString = useMemo(
+    () => allAssets ? ACCEPTED_ALL_FORMATS : accept.join(","),
+    [allAssets, accept]
+  );
+  const themeClass = useMemo(
+    () => theme === "dark" ? "sirv-uploader--dark" : theme === "light" ? "sirv-uploader--light" : void 0,
+    [theme]
+  );
   const handleFiles = useCallback(
     (files) => {
       if (autoUpload) {
@@ -2157,9 +2670,7 @@ function SirvUploader({
         onSelect?.(files);
       } else {
         setStagedFiles((prev) => {
-          const newFiles = files.filter(
-            (f) => !prev.some((p) => p.id === f.id)
-          );
+          const newFiles = files.filter((f) => !prev.some((p) => p.id === f.id));
           return [...prev, ...newFiles].slice(0, maxFiles);
         });
         onSelect?.(files);
@@ -2167,76 +2678,30 @@ function SirvUploader({
     },
     [upload, onSelect, autoUpload, maxFiles]
   );
+  const externalImport = useExternalImport({
+    maxFiles,
+    onComplete: useCallback(
+      (files) => {
+        handleFiles(files);
+        setActiveTab("upload");
+      },
+      [handleFiles]
+    )
+  });
   const handleSpreadsheet = useCallback(() => {
     setActiveTab("urls");
   }, []);
-  const downloadAndStageFile = useCallback(async (url, filename, accessToken) => {
-    try {
-      const headers = {};
-      if (accessToken) {
-        headers.Authorization = `Bearer ${accessToken}`;
-      }
-      const response = await fetch(url, { headers });
-      if (!response.ok) throw new Error("Download failed");
-      const blob = await response.blob();
-      const file = new File([blob], filename, { type: blob.type || "image/png" });
-      return {
-        id: generateId(),
-        file,
-        filename,
-        previewUrl: URL.createObjectURL(blob),
-        size: blob.size,
-        status: "pending",
-        progress: 0
-      };
-    } catch (err) {
-      console.error(`Failed to download ${filename}:`, err);
-      return null;
-    }
-  }, []);
   const handleUrls = useCallback(
     async (urls) => {
-      const validUrls = urls.slice(0, maxFiles);
-      if (validUrls.length === 0) return;
-      setIsImporting(true);
-      setImportProgress({ current: 0, total: validUrls.length, source: "URLs" });
-      const newFiles = [];
-      for (let i = 0; i < validUrls.length; i++) {
-        const url = validUrls[i];
-        setImportProgress({ current: i + 1, total: validUrls.length, source: "URLs" });
-        const filename = url.split("/").pop()?.split("?")[0] || `image-${i + 1}.png`;
-        const staged = await downloadAndStageFile(url, filename);
-        if (staged) newFiles.push(staged);
-      }
-      setIsImporting(false);
-      setImportProgress({ current: 0, total: 0, source: "" });
-      if (newFiles.length > 0) {
-        handleFiles(newFiles);
-        setActiveTab("upload");
-      }
+      await externalImport.importFiles(
+        urls.map((url) => ({
+          url,
+          name: url.split("/").pop()?.split("?")[0] || "image.png"
+        })),
+        "URLs"
+      );
     },
-    [maxFiles, downloadAndStageFile, handleFiles]
-  );
-  const handlePickerSelect = useCallback(
-    async (items) => {
-      setIsPickerOpen(false);
-      setIsImporting(true);
-      setImportProgress({ current: 0, total: items.length, source: "Sirv" });
-      const newFiles = [];
-      for (let i = 0; i < items.slice(0, maxFiles).length; i++) {
-        const item = items[i];
-        setImportProgress({ current: i + 1, total: items.length, source: "Sirv" });
-        const url = `https://${sirvAccount}.sirv.com${item.path}`;
-        const staged = await downloadAndStageFile(url, item.name);
-        if (staged) newFiles.push(staged);
-      }
-      setIsImporting(false);
-      setImportProgress({ current: 0, total: 0, source: "" });
-      if (newFiles.length > 0) {
-        handleFiles(newFiles);
-      }
-    },
-    [sirvAccount, maxFiles, downloadAndStageFile, handleFiles]
+    [externalImport]
   );
   const handleRemove = useCallback(
     (id) => {
@@ -2253,6 +2718,16 @@ function SirvUploader({
   const handleEdit = useCallback((file) => {
     console.log("Edit file:", file.filename);
   }, []);
+  const handleFileEdited = useCallback(
+    (id, editedFile, previewUrl) => {
+      setStagedFiles(
+        (prev) => prev.map(
+          (f) => f.id === id ? { ...f, file: editedFile, filename: editedFile.name, previewUrl, size: editedFile.size } : f
+        )
+      );
+    },
+    []
+  );
   const handleAddMore = useCallback(
     (files) => {
       setStagedFiles((prev) => [...prev, ...files].slice(0, maxFiles));
@@ -2272,103 +2747,101 @@ function SirvUploader({
   }, [upload, showStagedMode]);
   const dropboxChooser = useDropboxChooser({
     appKey: dropbox?.appKey || "",
-    onSelect: async (files) => {
-      setIsImporting(true);
-      setImportProgress({ current: 0, total: files.length, source: "Dropbox" });
-      const newFiles = [];
-      for (let i = 0; i < files.slice(0, maxFiles).length; i++) {
-        const f = files[i];
-        setImportProgress({ current: i + 1, total: files.length, source: "Dropbox" });
-        const staged = await downloadAndStageFile(f.link, f.name);
-        if (staged) newFiles.push(staged);
-      }
-      setIsImporting(false);
-      setImportProgress({ current: 0, total: 0, source: "" });
-      if (newFiles.length > 0) {
-        handleFiles(newFiles);
-        setActiveTab("upload");
-      }
-    }
+    onSelect: useCallback(
+      async (files) => {
+        await externalImport.importFiles(
+          files.map((f) => ({ url: f.link, name: f.name })),
+          "Dropbox"
+        );
+      },
+      [externalImport]
+    )
   });
   const googleDrivePicker = useGoogleDrivePicker({
     clientId: googleDrive?.clientId || "",
     apiKey: googleDrive?.apiKey || "",
     appId: googleDrive?.appId || "",
-    onSelect: async (files, accessToken) => {
-      setIsImporting(true);
-      setImportProgress({ current: 0, total: files.length, source: "Google Drive" });
-      const newFiles = [];
-      for (let i = 0; i < files.slice(0, maxFiles).length; i++) {
-        const f = files[i];
-        setImportProgress({ current: i + 1, total: files.length, source: "Google Drive" });
-        const downloadUrl = `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`;
-        const staged = await downloadAndStageFile(downloadUrl, f.name, accessToken);
-        if (staged) newFiles.push(staged);
-      }
-      setIsImporting(false);
-      setImportProgress({ current: 0, total: 0, source: "" });
-      if (newFiles.length > 0) {
-        handleFiles(newFiles);
-        setActiveTab("upload");
-      }
-    }
+    onSelect: useCallback(
+      async (files, accessToken) => {
+        await externalImport.importFiles(
+          files.map((f) => ({
+            url: `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`,
+            name: f.name,
+            accessToken
+          })),
+          "Google Drive"
+        );
+      },
+      [externalImport]
+    )
   });
   const hasDropbox = !!dropbox?.appKey && dropboxChooser.isConfigured;
   const hasGoogleDrive = !!googleDrive && googleDrivePicker.isConfigured;
-  const hasFiles = showStagedMode ? stagedFiles.length > 0 : upload.files.length > 0;
-  const hasPendingFiles = showStagedMode ? stagedFiles.some((f) => f.status === "pending" || f.status === "error") : upload.files.some((f) => f.status === "pending" || f.status === "error");
   const showTabs = csvImport || hasDropbox || hasGoogleDrive;
-  const browseEndpoint = proxyEndpoint || (presignEndpoint ? presignEndpoint.replace(/\/presign$/, "") : "");
-  const themeClass = theme === "dark" ? "sirv-uploader--dark" : theme === "light" ? "sirv-uploader--light" : void 0;
-  const acceptString = allAssets ? ACCEPTED_ALL_FORMATS : accept.join(",");
-  return /* @__PURE__ */ jsxs("div", { className: clsx6("sirv-uploader", themeClass, className), children: [
+  const dropzoneLabels = useMemo(
+    () => ({
+      dropzone: labels.dropzone,
+      dropzoneHint: labels.dropzoneHint,
+      browse: labels.browse,
+      pasteHint: labels.pasteHint
+    }),
+    [labels]
+  );
+  const stagedGridLabels = useMemo(
+    () => ({
+      addMore: labels.addMore,
+      edit: labels.edit,
+      remove: labels.remove
+    }),
+    [labels]
+  );
+  const fileListLabels = useMemo(
+    () => ({
+      retry: labels.retry,
+      remove: labels.remove,
+      uploading: labels.uploading,
+      processing: labels.processing,
+      success: labels.success,
+      error: labels.error
+    }),
+    [labels]
+  );
+  return /* @__PURE__ */ jsxs("div", { className: clsx3("sirv-uploader", themeClass, className), children: [
     showTabs && /* @__PURE__ */ jsxs("div", { className: "sirv-tabs", children: [
-      /* @__PURE__ */ jsxs(
-        "button",
+      /* @__PURE__ */ jsx(
+        TabButton,
         {
-          type: "button",
-          className: clsx6("sirv-tabs__tab", activeTab === "upload" && "sirv-tabs__tab--active"),
+          active: activeTab === "upload",
           onClick: () => setActiveTab("upload"),
-          children: [
-            /* @__PURE__ */ jsx(UploadIcon, {}),
-            labels.uploadFiles
-          ]
+          icon: /* @__PURE__ */ jsx(UploadIcon, {}),
+          label: labels.uploadFiles
         }
       ),
-      csvImport && /* @__PURE__ */ jsxs(
-        "button",
+      csvImport && /* @__PURE__ */ jsx(
+        TabButton,
         {
-          type: "button",
-          className: clsx6("sirv-tabs__tab", activeTab === "urls" && "sirv-tabs__tab--active"),
+          active: activeTab === "urls",
           onClick: () => setActiveTab("urls"),
-          children: [
-            /* @__PURE__ */ jsx(UrlIcon, {}),
-            labels.importUrls
-          ]
+          icon: /* @__PURE__ */ jsx(UrlIcon, {}),
+          label: labels.importUrls
         }
       ),
-      hasDropbox && /* @__PURE__ */ jsxs(
-        "button",
+      hasDropbox && /* @__PURE__ */ jsx(
+        TabButton,
         {
-          type: "button",
-          className: clsx6("sirv-tabs__tab", activeTab === "dropbox" && "sirv-tabs__tab--active"),
+          active: activeTab === "dropbox",
           onClick: () => setActiveTab("dropbox"),
-          children: [
-            /* @__PURE__ */ jsx(DropboxIcon, {}),
-            labels.importFromDropbox
-          ]
+          icon: /* @__PURE__ */ jsx(DropboxIcon, {}),
+          label: labels.importFromDropbox
         }
       ),
-      hasGoogleDrive && /* @__PURE__ */ jsxs(
-        "button",
+      hasGoogleDrive && /* @__PURE__ */ jsx(
+        TabButton,
         {
-          type: "button",
-          className: clsx6("sirv-tabs__tab", activeTab === "gdrive" && "sirv-tabs__tab--active"),
+          active: activeTab === "gdrive",
           onClick: () => setActiveTab("gdrive"),
-          children: [
-            /* @__PURE__ */ jsx(GoogleDriveIcon, {}),
-            labels.importFromGoogleDrive
-          ]
+          icon: /* @__PURE__ */ jsx(GoogleDriveIcon, {}),
+          label: labels.importFromGoogleDrive
         }
       )
     ] }),
@@ -2378,15 +2851,13 @@ function SirvUploader({
         files: stagedFiles,
         onRemove: handleRemove,
         onEdit: handleEdit,
+        onFileEdited: handleFileEdited,
         onAddMore: handleAddMore,
         maxFiles,
         accept: acceptString,
         disabled,
-        labels: {
-          addMore: labels.addMore,
-          edit: labels.edit,
-          remove: labels.remove
-        }
+        enableEditor: imageEditor,
+        labels: stagedGridLabels
       }
     ) : /* @__PURE__ */ jsxs(Fragment, { children: [
       dragDrop && /* @__PURE__ */ jsx(
@@ -2401,12 +2872,7 @@ function SirvUploader({
           compact,
           enablePaste: paste,
           acceptAllAssets: allAssets,
-          labels: {
-            dropzone: labels.dropzone,
-            dropzoneHint: labels.dropzoneHint,
-            browse: labels.browse,
-            pasteHint: labels.pasteHint
-          },
+          labels: dropzoneLabels,
           children
         }
       ),
@@ -2416,93 +2882,68 @@ function SirvUploader({
           files: upload.files,
           onRemove: handleRemove,
           onRetry: upload.retryFile,
-          labels: {
-            retry: labels.retry,
-            remove: labels.remove,
-            uploading: labels.uploading,
-            processing: labels.processing,
-            success: labels.success,
-            error: labels.error
-          }
+          labels: fileListLabels
         }
       )
     ] }) }),
     activeTab === "urls" && csvImport && /* @__PURE__ */ jsx(SpreadsheetImport, { onUrls: handleUrls }),
-    isImporting && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__import-progress", children: [
+    externalImport.isImporting && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__import-progress", children: [
       /* @__PURE__ */ jsx("div", { className: "sirv-uploader__import-spinner" }),
       /* @__PURE__ */ jsxs("p", { className: "sirv-uploader__import-text", children: [
         "Importing from ",
-        importProgress.source,
+        externalImport.progress.source,
         "..."
       ] }),
       /* @__PURE__ */ jsxs("p", { className: "sirv-uploader__import-count", children: [
-        importProgress.current,
+        externalImport.progress.current,
         " / ",
-        importProgress.total
+        externalImport.progress.total
       ] })
     ] }),
-    activeTab === "dropbox" && hasDropbox && !isImporting && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__external-picker", children: [
-      /* @__PURE__ */ jsx("div", { className: "sirv-uploader__external-icon sirv-uploader__external-icon--dropbox", children: /* @__PURE__ */ jsx(DropboxIcon, {}) }),
-      /* @__PURE__ */ jsx("h3", { className: "sirv-uploader__external-title", children: "Import from Dropbox" }),
-      /* @__PURE__ */ jsx("p", { className: "sirv-uploader__external-description", children: "Select files from your Dropbox account" }),
-      /* @__PURE__ */ jsx(
-        "button",
-        {
-          type: "button",
-          className: "sirv-btn sirv-btn--primary sirv-btn--dropbox",
-          onClick: dropboxChooser.openChooser,
-          disabled: disabled || dropboxChooser.isLoading,
-          children: dropboxChooser.isLoading ? labels.uploading : "Open Dropbox"
-        }
-      )
-    ] }),
-    activeTab === "gdrive" && hasGoogleDrive && !isImporting && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__external-picker", children: [
-      /* @__PURE__ */ jsx("div", { className: "sirv-uploader__external-icon sirv-uploader__external-icon--gdrive", children: /* @__PURE__ */ jsx(GoogleDriveIcon, {}) }),
-      /* @__PURE__ */ jsx("h3", { className: "sirv-uploader__external-title", children: "Import from Google Drive" }),
-      /* @__PURE__ */ jsx("p", { className: "sirv-uploader__external-description", children: "Select files from your Google Drive" }),
-      /* @__PURE__ */ jsx(
-        "button",
-        {
-          type: "button",
-          className: "sirv-btn sirv-btn--primary sirv-btn--gdrive",
-          onClick: googleDrivePicker.openPicker,
-          disabled: disabled || googleDrivePicker.isLoading,
-          children: googleDrivePicker.isLoading ? labels.uploading : "Open Google Drive"
-        }
-      )
-    ] }),
-    (hasFiles || filePicker) && activeTab === "upload" && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__toolbar", children: [
-      /* @__PURE__ */ jsx("div", { className: "sirv-uploader__toolbar-left", children: filePicker && browseEndpoint && /* @__PURE__ */ jsxs(
-        "button",
-        {
-          type: "button",
-          className: "sirv-btn",
-          onClick: () => setIsPickerOpen(true),
-          disabled,
-          children: [
-            /* @__PURE__ */ jsx("svg", { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", children: /* @__PURE__ */ jsx("path", { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" }) }),
-            labels.selectFromSirv
-          ]
-        }
-      ) }),
+    activeTab === "dropbox" && hasDropbox && !externalImport.isImporting && /* @__PURE__ */ jsx(
+      ExternalPickerPanel,
+      {
+        icon: /* @__PURE__ */ jsx(DropboxIcon, {}),
+        title: "Import from Dropbox",
+        description: "Select files from your Dropbox account",
+        buttonLabel: "Open Dropbox",
+        onOpen: dropboxChooser.openChooser,
+        disabled,
+        isLoading: dropboxChooser.isLoading,
+        variant: "dropbox"
+      }
+    ),
+    activeTab === "gdrive" && hasGoogleDrive && !externalImport.isImporting && /* @__PURE__ */ jsx(
+      ExternalPickerPanel,
+      {
+        icon: /* @__PURE__ */ jsx(GoogleDriveIcon, {}),
+        title: "Import from Google Drive",
+        description: "Select files from your Google Drive",
+        buttonLabel: "Open Google Drive",
+        onOpen: googleDrivePicker.openPicker,
+        disabled,
+        isLoading: googleDrivePicker.isLoading,
+        variant: "gdrive"
+      }
+    ),
+    hasFiles && activeTab === "upload" && /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__toolbar", children: [
+      /* @__PURE__ */ jsx("div", { className: "sirv-uploader__toolbar-left" }),
       /* @__PURE__ */ jsxs("div", { className: "sirv-uploader__toolbar-right", children: [
-        hasFiles && /* @__PURE__ */ jsxs(Fragment, { children: [
-          /* @__PURE__ */ jsxs("span", { className: "sirv-uploader__file-count", children: [
-            showStagedMode ? stagedFiles.length : upload.files.length,
-            " ",
-            labels.filesSelected
-          ] }),
-          /* @__PURE__ */ jsx(
-            "button",
-            {
-              type: "button",
-              className: "sirv-btn",
-              onClick: handleClearAll,
-              disabled: disabled || upload.isUploading,
-              children: labels.clearAll
-            }
-          )
+        /* @__PURE__ */ jsxs("span", { className: "sirv-uploader__file-count", children: [
+          showStagedMode ? stagedFiles.length : upload.files.length,
+          " ",
+          labels.filesSelected
         ] }),
+        /* @__PURE__ */ jsx(
+          "button",
+          {
+            type: "button",
+            className: "sirv-btn",
+            onClick: handleClearAll,
+            disabled: disabled || upload.isUploading,
+            children: labels.clearAll
+          }
+        ),
         showStagedMode && hasPendingFiles && /* @__PURE__ */ jsxs(
           "button",
           {
@@ -2528,25 +2969,10 @@ function SirvUploader({
         )
       ] })
     ] }),
-    hasFiles && autoUpload && /* @__PURE__ */ jsx(FileListSummary, { files: upload.files }),
-    filePicker && browseEndpoint && /* @__PURE__ */ jsx(
-      FilePicker,
-      {
-        endpoint: browseEndpoint,
-        isOpen: isPickerOpen,
-        onClose: () => setIsPickerOpen(false),
-        onSelect: handlePickerSelect,
-        multiple: batch,
-        initialPath: folder,
-        labels: {
-          title: labels.selectFromSirv,
-          cancel: labels.cancel
-        }
-      }
-    )
+    hasFiles && autoUpload && /* @__PURE__ */ jsx(FileListSummary, { files: upload.files })
   ] });
 }
 
-export { ACCEPTED_3D_FORMATS, ACCEPTED_ALL_FORMATS, ACCEPTED_IMAGE_FORMATS, ACCEPTED_VIDEO_FORMATS, DEFAULT_MAX_FILE_SIZE, DropZone, FileList, FileListSummary, FilePicker, SirvUploader, SpreadsheetImport, StagedFilesGrid, canPreviewFile, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getFileCategory, getImageDimensions, getMimeType, is3DModelFile, isHeifFile, isImageFile, isPdfFile, isSpreadsheetFile, isSvgFile, isVideoFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useDropboxChooser, useGoogleDrivePicker, useSirvUpload, validateFileSize };
+export { ACCEPTED_3D_FORMATS, ACCEPTED_ALL_FORMATS, ACCEPTED_IMAGE_FORMATS, ACCEPTED_VIDEO_FORMATS, DEFAULT_MAX_FILE_SIZE, DropZone, FileList, FileListSummary, ImageEditor, SirvUploader, SpreadsheetImport, StagedFilesGrid, canPreviewFile, convertHeicWithFallback, defaultUrlValidator, detectDelimiter, formatFileSize, generateId, getFileCategory, getImageDimensions, getMimeType, is3DModelFile, isHeifFile, isImageFile, isPdfFile, isSpreadsheetFile, isSvgFile, isVideoFile, parseCsvClient, parseExcelClient, sirvUrlValidator, useDropboxChooser, useGoogleDrivePicker, useImageEditor, useSirvUpload, validateFileSize };
 //# sourceMappingURL=index.mjs.map
 //# sourceMappingURL=index.mjs.map

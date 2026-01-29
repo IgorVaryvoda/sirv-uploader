@@ -57,8 +57,7 @@ export default function UploadPage() {
 
 | Prop | Type | Default | Description |
 |------|------|---------|-------------|
-| `proxyEndpoint` | `string` | - | URL of your upload proxy (Cloudflare Worker) |
-| `presignEndpoint` | `string` | - | Alternative: endpoint for presigned URLs |
+| `proxyEndpoint` | `string` | **required** | URL of your upload proxy that forwards to Sirv REST API |
 | `folder` | `string` | `"/"` | Default upload folder |
 | `onUpload` | `(files: SirvFile[]) => void` | - | Callback when files are uploaded |
 | `onError` | `(error: string, file?: SirvFile) => void` | - | Callback on upload errors |

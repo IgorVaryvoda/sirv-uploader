@@ -50,74 +50,54 @@ export interface ConflictInfo {
 }
 
 // -----------------------------------------------------------------------------
-// Presigned URL Mode (RECOMMENDED)
+// Proxy Upload Mode
 // -----------------------------------------------------------------------------
 
 /**
- * For presigned URL mode, user's backend only needs ONE endpoint.
- * The widget uploads directly to Sirv's S3 endpoint.
+ * The widget uploads files through a proxy endpoint to Sirv's REST API.
+ * Your backend receives the file and forwards it to Sirv.
  *
  * Example backend implementation (Next.js):
  * ```typescript
- * import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
- * import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
- *
- * const s3 = new S3Client({
- *   endpoint: 'https://s3.sirv.com',
- *   region: 'us-east-1',
- *   credentials: {
- *     accessKeyId: process.env.SIRV_S3_KEY!,
- *     secretAccessKey: process.env.SIRV_S3_SECRET!,
- *   },
- *   forcePathStyle: true,
- * })
- *
+ * // app/api/sirv/upload/route.ts
  * export async function POST(req: Request) {
- *   const { filename, contentType, folder } = await req.json()
- *   const key = `${folder}/${filename}`.replace(/^\/+/, '')
+ *   const url = new URL(req.url)
+ *   const filename = url.searchParams.get('filename')!
+ *   const folder = url.searchParams.get('folder') || '/'
  *
- *   const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
- *     Bucket: process.env.SIRV_BUCKET!,
- *     Key: key,
- *     ContentType: contentType,
- *   }), { expiresIn: 300 })
+ *   // Get Sirv access token (you should cache this)
+ *   const tokenRes = await fetch('https://api.sirv.com/v2/token', {
+ *     method: 'POST',
+ *     headers: { 'Content-Type': 'application/json' },
+ *     body: JSON.stringify({
+ *       clientId: process.env.SIRV_CLIENT_ID,
+ *       clientSecret: process.env.SIRV_CLIENT_SECRET,
+ *     }),
+ *   })
+ *   const { token } = await tokenRes.json()
  *
- *   const publicUrl = `https://${process.env.SIRV_BUCKET}.sirv.com/${key}`
- *   return Response.json({ uploadUrl, publicUrl, path: '/' + key })
+ *   // Upload file to Sirv REST API
+ *   const path = `${folder}/${filename}`.replace(/\/+/g, '/')
+ *   const uploadRes = await fetch(
+ *     `https://api.sirv.com/v2/files/upload?filename=${encodeURIComponent(path)}`,
+ *     {
+ *       method: 'POST',
+ *       headers: {
+ *         'Authorization': `Bearer ${token}`,
+ *         'Content-Type': req.headers.get('Content-Type') || 'application/octet-stream',
+ *       },
+ *       body: req.body,
+ *     }
+ *   )
+ *
+ *   if (!uploadRes.ok) {
+ *     return Response.json({ success: false, error: 'Upload failed' }, { status: 500 })
+ *   }
+ *
+ *   const publicUrl = `https://${process.env.SIRV_ACCOUNT}.sirv.com${path}`
+ *   return Response.json({ success: true, url: publicUrl, path })
  * }
  * ```
- */
-
-/** POST {presignEndpoint} - Get a presigned upload URL */
-export interface PresignRequest {
-  /** Target filename */
-  filename: string
-  /** Content type of the file */
-  contentType: string
-  /** Target folder path (e.g., "/uploads/2024") */
-  folder?: string
-  /** File size in bytes (for validation) */
-  size?: number
-}
-
-export interface PresignResponse {
-  /** Presigned URL to upload directly to Sirv S3 */
-  uploadUrl: string
-  /** Public CDN URL where file will be accessible */
-  publicUrl: string
-  /** Path on Sirv (e.g., "/uploads/2024/image.jpg") */
-  path: string
-  /** Error message if failed */
-  error?: string
-}
-
-// -----------------------------------------------------------------------------
-// Proxy Mode (Alternative)
-// -----------------------------------------------------------------------------
-
-/**
- * For proxy mode, user's backend handles all Sirv operations.
- * Use this if you can't use presigned URLs or need more control.
  */
 
 /** POST {endpoint}/upload - Upload a file to Sirv */
@@ -227,29 +207,19 @@ export interface GoogleDriveConfig {
 
 export interface SirvUploaderProps {
   /**
-   * RECOMMENDED: Endpoint to get presigned upload URLs.
-   * Widget will POST { filename, contentType, folder } and expect { uploadUrl, publicUrl, path }
-   * Then upload directly to Sirv's S3 endpoint.
+   * Proxy endpoint URL for uploading files to Sirv.
+   * Your backend should forward the file to Sirv's REST API.
    *
-   * Your backend just needs to call AWS SDK's getSignedUrl with Sirv's S3 endpoint.
-   */
-  presignEndpoint?: string
-
-  /**
-   * ALTERNATIVE: Base URL for full proxy endpoint.
-   * Use this if you can't use presigned URLs.
    * The widget will call:
-   * - POST {endpoint}/upload (with file data)
-   * - GET {endpoint}/browse
+   * - POST {endpoint}/upload?filename=...&folder=... (with file binary in body)
+   *
+   * Expected response: { success: true, url: "...", path: "..." }
+   *
+   * Optional endpoints for file browsing (if you want to enable Sirv file picker):
+   * - GET {endpoint}/browse?path=/folder
    * - DELETE {endpoint}/delete
    */
-  proxyEndpoint?: string
-
-  /**
-   * Sirv account/bucket name (e.g., "myaccount" for myaccount.sirv.com)
-   * Required for file picker when using presigned URLs.
-   */
-  sirvAccount?: string
+  proxyEndpoint: string
 
   /**
    * Default folder to upload files to.
@@ -285,14 +255,14 @@ export interface SirvUploaderProps {
     batch?: boolean
     /** Enable CSV/Excel import tab. @default true */
     csvImport?: boolean
-    /** Enable Sirv file picker. @default true */
-    filePicker?: boolean
     /** Enable drag and drop. @default true */
     dragDrop?: boolean
     /** Enable clipboard paste. @default true */
     paste?: boolean
     /** Accept all asset types (images, videos, 3D, PDF). @default false */
     allAssets?: boolean
+    /** Enable built-in image editor for staged files. @default true */
+    imageEditor?: boolean
   }
 
   /**
@@ -456,36 +426,6 @@ export interface UseSirvUploadReturn {
   isUploading: boolean
   /** True if all files have been uploaded */
   isComplete: boolean
-}
-
-export interface UseFilePickerOptions {
-  endpoint: string
-  fileType?: 'image' | 'video' | 'all'
-}
-
-export interface UseFilePickerReturn {
-  /** Current folder path */
-  currentPath: string
-  /** Items in current folder */
-  items: BrowseItem[]
-  /** Loading state */
-  isLoading: boolean
-  /** Error message */
-  error: string | null
-  /** Navigate to a folder */
-  navigateTo: (path: string) => void
-  /** Go up one folder */
-  goUp: () => void
-  /** Refresh current folder */
-  refresh: () => void
-  /** Search within current folder */
-  search: (query: string) => void
-  /** Select a file */
-  selectFile: (item: BrowseItem) => void
-  /** Selected files */
-  selectedFiles: BrowseItem[]
-  /** Clear selection */
-  clearSelection: () => void
 }
 
 // -----------------------------------------------------------------------------
